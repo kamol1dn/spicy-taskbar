@@ -1,0 +1,17 @@
+D:\temp\lyrics spicy\TaskbarLyrics\obj\Release\net8.0-windows10.0.19041.0\TaskbarLyrics.GeneratedMSBuildEditorConfig.editorconfig
+D:\temp\lyrics spicy\TaskbarLyrics\obj\Release\net8.0-windows10.0.19041.0\TaskbarLyrics.AssemblyInfoInputs.cache
+D:\temp\lyrics spicy\TaskbarLyrics\obj\Release\net8.0-windows10.0.19041.0\TaskbarLyrics.AssemblyInfo.cs
+D:\temp\lyrics spicy\TaskbarLyrics\obj\Release\net8.0-windows10.0.19041.0\TaskbarLyrics.csproj.CoreCompileInputs.cache
+D:\temp\lyrics spicy\TaskbarLyrics\bin\Release\net8.0-windows10.0.19041.0\TaskbarLyrics.exe
+D:\temp\lyrics spicy\TaskbarLyrics\bin\Release\net8.0-windows10.0.19041.0\TaskbarLyrics.deps.json
+D:\temp\lyrics spicy\TaskbarLyrics\bin\Release\net8.0-windows10.0.19041.0\TaskbarLyrics.runtimeconfig.json
+D:\temp\lyrics spicy\TaskbarLyrics\bin\Release\net8.0-windows10.0.19041.0\TaskbarLyrics.dll
+D:\temp\lyrics spicy\TaskbarLyrics\bin\Release\net8.0-windows10.0.19041.0\TaskbarLyrics.pdb
+D:\temp\lyrics spicy\TaskbarLyrics\bin\Release\net8.0-windows10.0.19041.0\Microsoft.Windows.SDK.NET.dll
+D:\temp\lyrics spicy\TaskbarLyrics\bin\Release\net8.0-windows10.0.19041.0\WinRT.Runtime.dll
+D:\temp\lyrics spicy\TaskbarLyrics\obj\Release\net8.0-windows10.0.19041.0\TaskbarL.071AA130.Up2Date
+D:\temp\lyrics spicy\TaskbarLyrics\obj\Release\net8.0-windows10.0.19041.0\TaskbarLyrics.dll
+D:\temp\lyrics spicy\TaskbarLyrics\obj\Release\net8.0-windows10.0.19041.0\refint\TaskbarLyrics.dll
+D:\temp\lyrics spicy\TaskbarLyrics\obj\Release\net8.0-windows10.0.19041.0\TaskbarLyrics.pdb
+D:\temp\lyrics spicy\TaskbarLyrics\obj\Release\net8.0-windows10.0.19041.0\TaskbarLyrics.genruntimeconfig.cache
+D:\temp\lyrics spicy\TaskbarLyrics\obj\Release\net8.0-windows10.0.19041.0\ref\TaskbarLyrics.dll
