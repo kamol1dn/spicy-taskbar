@@ -1,7 +1,9 @@
 # Taskbar Lyrics
 
-https://github.com/kamol1dn/spicy-taskbar/raw/main/readme-assets/example.mp4
 
+https://github.com/kamol1dn/taskbar-lyrics/raw/main/readme-assets/example.mp4
+
+<video src="readme-assets/example.mp4" controls muted loop width="100%"></video>
 Synced (word-by-word, karaoke-style) lyrics rendered directly on the Windows taskbar,
 for whatever is playing — Spotify, YouTube in a browser, anything that shows up in the
 Windows media flyout.
