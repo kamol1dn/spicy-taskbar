@@ -34,6 +34,25 @@ public sealed class Config
     /// <summary>Extra ms of lead time applied to all lyrics (positive = lyrics earlier).</summary>
     public int GlobalOffsetMs { get; set; } = 0;
 
+    // ---- audio visualizer ----
+
+    /// <summary>Master on/off for the taskbar audio visualizer (toggled from the tray).</summary>
+    public bool VizEnabled { get; set; } = true;
+
+    /// <summary>Selected preset id — see <see cref="VisualizerPresets"/>.</summary>
+    public string VizPreset { get; set; } = "equalizer-bleed";
+
+    /// <summary>Pick a new random preset each time the song changes.</summary>
+    public bool VizRandomizeOnTrack { get; set; } = false;
+
+    /// <summary>How much of the screen height the visualizer surface covers (0.15–0.6);
+    /// the "bleed" presets paint upward into this band, taskbar-only presets ignore it.</summary>
+    public double VizHeightFraction { get; set; } = 0.33;
+
+    /// <summary>Master brightness of the whole visualizer (0–1). Kept low so it stays a
+    /// backdrop and doesn't wash out the taskbar icons / lyrics rendered in front of it.</summary>
+    public double VizOpacity { get; set; } = 0.55;
+
     public static string Dir =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TaskbarLyrics");
 
@@ -51,6 +70,20 @@ public sealed class Config
         catch
         {
             return new Config();
+        }
+    }
+
+    /// <summary>Persist current values back to config.json (used by tray toggles).</summary>
+    public void Save()
+    {
+        try
+        {
+            var path = Path.Combine(AppContext.BaseDirectory, "config.json");
+            File.WriteAllText(path, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
+        }
+        catch (Exception ex)
+        {
+            Log.Write($"config: save failed: {ex.Message}");
         }
     }
 }

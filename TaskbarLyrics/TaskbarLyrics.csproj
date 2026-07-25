@@ -20,4 +20,9 @@
     <Using Remove="System.Windows.Forms" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- WASAPI loopback capture + FFT for the audio visualizer. -->
+    <PackageReference Include="NAudio" Version="2.2.1" />
+  </ItemGroup>
+
 </Project>

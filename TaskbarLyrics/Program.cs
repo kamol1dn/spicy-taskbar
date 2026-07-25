@@ -21,6 +21,7 @@ public static class Program
         var service = new LyricsService(bridge);
         var watcher = new SmtcWatcher(bridge);
         var overlay = new OverlayWindow(cfg);
+        var viz = new VisualizerWindow(cfg);
 
         TrackInfo? lastInfo = null;
         watcher.TrackChanged += info =>
@@ -28,8 +29,12 @@ public static class Program
             lastInfo = info;
             // Clear immediately so the previous song's lines never linger.
             overlay.Dispatcher.BeginInvoke(() => overlay.SetLyrics(null));
+            viz.Dispatcher.BeginInvoke(viz.OnTrackChanged);
             service.OnTrackChanged(info);
         };
+        // Album art drives the visualizer's gradient colors.
+        watcher.ArtworkChanged += bytes =>
+            viz.Dispatcher.BeginInvoke(() => viz.SetArtwork(bytes));
         service.LyricsResolved += lyrics =>
             overlay.Dispatcher.BeginInvoke(() => overlay.SetLyrics(lyrics));
 
@@ -46,8 +51,9 @@ public static class Program
         bridge.Start();
         watcher.Start();
         overlay.Show();
+        viz.SetEnabled(cfg.VizEnabled);
 
-        using var tray = new TrayIcon(overlay, app);
+        using var tray = new TrayIcon(overlay, viz, app);
         app.Run();
     }
 }

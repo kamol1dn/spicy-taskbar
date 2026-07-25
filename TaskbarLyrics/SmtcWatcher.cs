@@ -1,4 +1,5 @@
 using Windows.Media.Control;
+using Windows.Storage.Streams;
 
 namespace TaskbarLyrics;
 
@@ -32,6 +33,9 @@ public sealed class SmtcWatcher
 
     public event Action<TrackInfo?>? TrackChanged;
 
+    /// <summary>Raised on a real track change with the album-art bytes (or null when none).</summary>
+    public event Action<byte[]?>? ArtworkChanged;
+
     public SmtcWatcher(BridgeServer bridge) => _bridge = bridge;
 
     public void Start() => _ = Task.Run(PollLoop);
@@ -55,7 +59,7 @@ public sealed class SmtcWatcher
         if (session == null)
         {
             PositionEngine.Clear();
-            EmitIfChanged(null);
+            if (EmitIfChanged(null)) ArtworkChanged?.Invoke(null);
             return;
         }
 
@@ -68,7 +72,7 @@ public sealed class SmtcWatcher
         if (string.IsNullOrWhiteSpace(title))
         {
             PositionEngine.Clear();
-            EmitIfChanged(null);
+            if (EmitIfChanged(null)) ArtworkChanged?.Invoke(null);
             return;
         }
 
@@ -100,7 +104,29 @@ public sealed class SmtcWatcher
             PositionEngine.Set(posMs, playing, rate);
         }
 
-        EmitIfChanged(info);
+        if (EmitIfChanged(info)) _ = LoadArtworkAsync(props?.Thumbnail);
+    }
+
+    /// <summary>Read the current track's thumbnail bytes and hand them to the visualizer.</summary>
+    private async Task LoadArtworkAsync(IRandomAccessStreamReference? thumb)
+    {
+        try
+        {
+            if (thumb == null) { ArtworkChanged?.Invoke(null); return; }
+            using var ras = await thumb.OpenReadAsync();
+            var size = (uint)ras.Size;
+            if (size == 0) { ArtworkChanged?.Invoke(null); return; }
+            var reader = new DataReader(ras);
+            await reader.LoadAsync(size);
+            var bytes = new byte[size];
+            reader.ReadBytes(bytes);
+            ArtworkChanged?.Invoke(bytes);
+        }
+        catch (Exception ex)
+        {
+            Log.Write($"smtc: artwork load failed: {ex.Message}");
+            ArtworkChanged?.Invoke(null);
+        }
     }
 
     private static bool TitlesRoughlyMatch(string a, string b)
@@ -110,10 +136,11 @@ public sealed class SmtcWatcher
                b.Contains(a, StringComparison.OrdinalIgnoreCase);
     }
 
-    private void EmitIfChanged(TrackInfo? info)
+    /// <summary>Returns true when a real (debounced) track change was emitted this call.</summary>
+    private bool EmitIfChanged(TrackInfo? info)
     {
         var key = info?.Key;
-        if (key == _lastKey) { _pendingKey = null; return; }
+        if (key == _lastKey) { _pendingKey = null; return false; }
 
         // Debounce: browsers flicker metadata while loading — require the new
         // identity to hold for 700ms before treating it as a real track change.
@@ -121,13 +148,14 @@ public sealed class SmtcWatcher
         {
             _pendingKey = key;
             _pendingSince = DateTime.UtcNow;
-            return;
+            return false;
         }
-        if ((DateTime.UtcNow - _pendingSince).TotalMilliseconds < 700) return;
+        if ((DateTime.UtcNow - _pendingSince).TotalMilliseconds < 700) return false;
 
         _lastKey = key;
         _pendingKey = null;
         Log.Write($"smtc: track -> {(info == null ? "(none)" : $"{info.Artist} - {info.Title}" + (info.IsSpotify ? " [spotify]" : ""))}");
         TrackChanged?.Invoke(info);
+        return true;
     }
 }

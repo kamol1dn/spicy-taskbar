@@ -37,9 +37,12 @@ public sealed class OverlayWindow : Window
         SourceInitialized += (_, _) => ApplyClickThrough();
         Loaded += (_, _) => Reposition();
 
+        // Redraw only when the output would actually differ. Paused playback,
+        // held lines and instrumental gaps produce identical frames, so this
+        // drops a continuous full-refresh-rate repaint to near zero.
         CompositionTarget.Rendering += (_, _) =>
         {
-            if (_canvas.HasContent) _canvas.InvalidateVisual();
+            if (_canvas.Tick()) _canvas.InvalidateVisual();
         };
 
         _maintain = new System.Windows.Threading.DispatcherTimer
@@ -144,6 +147,120 @@ public sealed class LyricsCanvas : FrameworkElement
 
     public bool HasContent => _lyrics != null && PositionEngine.HasPosition;
 
+    /// <summary>What the next frame would show. Pure arithmetic — no layout or drawing.</summary>
+    private readonly record struct FrameState(
+        bool Visible, int Idx, bool ShowDots, double GapStart, double GapEnd, BgVocal? Bg, double T);
+
+    private FrameState ComputeState()
+    {
+        var ly = _lyrics;
+        var now = PositionEngine.NowMs;
+        if (ly == null || now == null) return default;
+        var t = now.Value + _cfg.GlobalOffsetMs;
+
+        var lines = ly.Lines;
+        int idx = -1;
+        for (int i = 0; i < lines.Count; i++)
+        {
+            if (lines[i].Start <= t) idx = i;
+            else break;
+        }
+
+        bool showDots = false;
+        double gapStart = 0, gapEnd = 0;
+        if (idx == -1)
+        {
+            if (t < -500) return default;
+            gapEnd = lines[0].Start;
+            if (gapEnd >= _cfg.InterludeGapMs) showDots = true;
+            else return default;
+        }
+        else if (t > lines[idx].End)
+        {
+            if (idx + 1 < lines.Count)
+            {
+                gapStart = lines[idx].End;
+                gapEnd = lines[idx + 1].Start;
+                if (gapEnd - gapStart >= _cfg.InterludeGapMs) showDots = true;
+            }
+            else if (t > lines[idx].End + 4000)
+            {
+                return default;
+            }
+        }
+
+        BgVocal? activeBg = null;
+        foreach (var bg in ly.Bg)
+        {
+            if (t >= bg.Start - 400 && t <= bg.End + 400) { activeBg = bg; break; }
+            if (bg.Start - 400 > t) break;
+        }
+
+        return new FrameState(true, idx, showDots, gapStart, gapEnd, activeBg, t);
+    }
+
+    /// <summary>Quantized sweep position, in the time domain so no layout is needed.</summary>
+    private static int SweepSig(List<Seg>? segs, double lineStart, double t)
+    {
+        if (segs == null) return t >= lineStart ? 1 : 0;
+        for (int i = 0; i < segs.Count; i++)
+        {
+            var s = segs[i];
+            if (t < s.Start) return i * 128;
+            if (t <= s.End)
+                return i * 128 + (int)((t - s.Start) / Math.Max(1, s.End - s.Start) * 127);
+        }
+        return segs.Count * 128;
+    }
+
+    /// <summary>
+    /// Advances animation state and reports whether the visible output changed.
+    /// Called once per display frame; returning false skips the repaint entirely.
+    /// </summary>
+    public bool Tick()
+    {
+        var st = ComputeState();
+
+        // Animation clocks must keep running even while we skip repaints.
+        var frameTick = Stopwatch.GetTimestamp();
+        var dtMs = _lastFrameTick == 0 ? 16.0
+            : Math.Min(100, (frameTick - _lastFrameTick) / (double)Stopwatch.Frequency * 1000);
+        _lastFrameTick = frameTick;
+
+        var bgTarget = st is { Visible: true, Bg: not null } ? 1.0 : 0.0;
+        var step = dtMs / 220.0;
+        _bgAnim = bgTarget > _bgAnim ? Math.Min(bgTarget, _bgAnim + step)
+                                     : Math.Max(bgTarget, _bgAnim - step);
+
+        int sig;
+        if (!st.Visible)
+        {
+            sig = 0;
+        }
+        else
+        {
+            var ly = _lyrics!;
+            var fadeMs = (frameTick - _lineShownTick) / (double)Stopwatch.Frequency * 1000;
+            var fadeQ = (int)(Math.Clamp(fadeMs / 160.0, 0, 1) * 32);
+
+            var mainSweep = st.ShowDots || st.Idx < 0 ? 0
+                : SweepSig(ly.Lines[st.Idx].Sylls, ly.Lines[st.Idx].Start, st.T);
+            var dotsQ = st.ShowDots
+                ? (int)(Math.Clamp((st.T - st.GapStart) / Math.Max(1, st.GapEnd - st.GapStart), 0, 1) * 256)
+                : 0;
+            var bgSweep = st.Bg is { } b ? SweepSig(b.Sylls, b.Start, st.T) : 0;
+
+            sig = HashCode.Combine(st.Idx, st.ShowDots, mainSweep, dotsQ,
+                                   st.Bg?.Start ?? -1, bgSweep, (int)(_bgAnim * 256), fadeQ);
+        }
+
+        if (sig == _lastSig) return false;
+        _lastSig = sig;
+        return true;
+    }
+
+    private int _lastSig = int.MinValue;
+
     public LyricsCanvas(Config cfg)
     {
         _cfg = cfg;
@@ -177,68 +294,24 @@ public sealed class LyricsCanvas : FrameworkElement
 
     protected override void OnRender(DrawingContext dc)
     {
-        var ly = _lyrics;
-        var now = PositionEngine.NowMs;
-        if (ly == null || now == null) return;
-        var t = now.Value + _cfg.GlobalOffsetMs;
+        var st = ComputeState();
+        if (!st.Visible) return;
 
-        // ---- pick the current main line ----
+        var ly = _lyrics!;
         var lines = ly.Lines;
-        int idx = -1;
-        for (int i = 0; i < lines.Count; i++)
-        {
-            if (lines[i].Start <= t) idx = i;
-            else break;
-        }
-
-        // gap handling: dots for long instrumentals, hide after outro
-        bool showDots = false;
-        double gapStart = 0, gapEnd = 0;
-        if (idx == -1)
-        {
-            if (t < -500) return;
-            gapStart = 0;
-            gapEnd = lines[0].Start;
-            if (gapEnd - gapStart >= _cfg.InterludeGapMs) showDots = true;
-            else return; // brief intro, show nothing
-        }
-        else if (t > lines[idx].End)
-        {
-            if (idx + 1 < lines.Count)
-            {
-                gapStart = lines[idx].End;
-                gapEnd = lines[idx + 1].Start;
-                if (gapEnd - gapStart >= _cfg.InterludeGapMs) showDots = true;
-                // else: hold the finished line until the next one starts
-            }
-            else if (t > lines[idx].End + 4000)
-            {
-                return; // outro
-            }
-        }
+        var t = st.T;
+        var idx = st.Idx;
+        var showDots = st.ShowDots;
+        var gapStart = st.GapStart;
+        var gapEnd = st.GapEnd;
+        var activeBg = st.Bg;
 
         var availW = ActualWidth - 4;
         if (availW < 40) return;
         var pixelsPerDip = VisualTreeHelper.GetDpi(this).PixelsPerDip;
 
-        // ---- background/filler vocal (bg-line) lookup ----
-        BgVocal? activeBg = null;
-        foreach (var bg in ly.Bg)
-        {
-            if (t >= bg.Start - 400 && t <= bg.End + 400) { activeBg = bg; break; }
-            if (bg.Start - 400 > t) break;
-        }
-
-        // Slide/fade animation for the filler row: ease toward visible when a
-        // bg vocal is active, back out when it ends — no layout snapping.
-        var frameTick = Stopwatch.GetTimestamp();
-        var dtMs = _lastFrameTick == 0 ? 16.0
-            : Math.Min(100, (frameTick - _lastFrameTick) / (double)Stopwatch.Frequency * 1000);
-        _lastFrameTick = frameTick;
-        var bgTarget = activeBg != null ? 1.0 : 0.0;
-        var step = dtMs / 220.0; // ~220ms slide
-        _bgAnim = bgTarget > _bgAnim ? Math.Min(bgTarget, _bgAnim + step)
-                                     : Math.Max(bgTarget, _bgAnim - step);
+        // _bgAnim is advanced by Tick() so the slide keeps time even across
+        // skipped frames; here we only shape it.
         var bgEase = _bgAnim * _bgAnim * (3 - 2 * _bgAnim); // smoothstep
 
         // Content is centered inside the strip so the overlay looks natural

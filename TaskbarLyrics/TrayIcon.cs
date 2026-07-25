@@ -10,10 +10,11 @@ public sealed class TrayIcon : IDisposable
 {
     private readonly System.Windows.Forms.NotifyIcon _icon;
 
-    public TrayIcon(OverlayWindow overlay, Application app)
+    public TrayIcon(OverlayWindow overlay, VisualizerWindow viz, Application app)
     {
         var menu = new System.Windows.Forms.ContextMenuStrip();
         menu.Items.Add("Toggle placement (taskbar/above)", null, (_, _) => overlay.Dispatcher.BeginInvoke(overlay.TogglePlacement));
+        menu.Items.Add(BuildVisualizerMenu(viz));
         menu.Items.Add("Open log", null, (_, _) =>
         {
             try
@@ -42,6 +43,42 @@ public sealed class TrayIcon : IDisposable
             Visible = true,
             ContextMenuStrip = menu,
         };
+    }
+
+    /// <summary>"Visualizer" submenu: on/off, randomize-on-track, and a radio list of presets.</summary>
+    private static System.Windows.Forms.ToolStripMenuItem BuildVisualizerMenu(VisualizerWindow viz)
+    {
+        var root = new System.Windows.Forms.ToolStripMenuItem("Visualizer");
+
+        var enabled = new System.Windows.Forms.ToolStripMenuItem("Enabled", null,
+            (_, _) => viz.Dispatcher.BeginInvoke(() => viz.SetEnabled(!viz.Enabled)));
+        var randomize = new System.Windows.Forms.ToolStripMenuItem("Randomize preset on song change", null,
+            (_, _) => viz.Dispatcher.BeginInvoke(() => viz.SetRandomize(!viz.Randomize)));
+
+        root.DropDownItems.Add(enabled);
+        root.DropDownItems.Add(randomize);
+        root.DropDownItems.Add(new System.Windows.Forms.ToolStripSeparator());
+
+        var presetItems = new List<(string Id, System.Windows.Forms.ToolStripMenuItem Item)>();
+        foreach (var preset in VisualizerPresets.All)
+        {
+            var id = preset.Id;
+            var item = new System.Windows.Forms.ToolStripMenuItem(preset.Name, null,
+                (_, _) => viz.Dispatcher.BeginInvoke(() => viz.SetPreset(id)));
+            presetItems.Add((id, item));
+            root.DropDownItems.Add(item);
+        }
+
+        // Reflect live state (incl. randomize-driven preset changes) each time it opens.
+        root.DropDownOpening += (_, _) =>
+        {
+            enabled.Checked = viz.Enabled;
+            randomize.Checked = viz.Randomize;
+            foreach (var (id, item) in presetItems)
+                item.Checked = viz.Preset.Id == id;
+        };
+
+        return root;
     }
 
     private static Icon MakeIcon()

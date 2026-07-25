@@ -15,3 +15,12 @@ D:\temp\lyrics spicy\TaskbarLyrics\obj\Release\net8.0-windows10.0.19041.0\refint
 D:\temp\lyrics spicy\TaskbarLyrics\obj\Release\net8.0-windows10.0.19041.0\TaskbarLyrics.pdb
 D:\temp\lyrics spicy\TaskbarLyrics\obj\Release\net8.0-windows10.0.19041.0\TaskbarLyrics.genruntimeconfig.cache
 D:\temp\lyrics spicy\TaskbarLyrics\obj\Release\net8.0-windows10.0.19041.0\ref\TaskbarLyrics.dll
+D:\temp\lyrics spicy\TaskbarLyrics\obj\Release\net8.0-windows10.0.19041.0\TaskbarLyrics.sourcelink.json
+D:\temp\lyrics spicy\TaskbarLyrics\bin\Release\net8.0-windows10.0.19041.0\NAudio.dll
+D:\temp\lyrics spicy\TaskbarLyrics\bin\Release\net8.0-windows10.0.19041.0\NAudio.Asio.dll
+D:\temp\lyrics spicy\TaskbarLyrics\bin\Release\net8.0-windows10.0.19041.0\NAudio.Core.dll
+D:\temp\lyrics spicy\TaskbarLyrics\bin\Release\net8.0-windows10.0.19041.0\NAudio.Midi.dll
+D:\temp\lyrics spicy\TaskbarLyrics\bin\Release\net8.0-windows10.0.19041.0\NAudio.Wasapi.dll
+D:\temp\lyrics spicy\TaskbarLyrics\bin\Release\net8.0-windows10.0.19041.0\NAudio.WinForms.dll
+D:\temp\lyrics spicy\TaskbarLyrics\bin\Release\net8.0-windows10.0.19041.0\NAudio.WinMM.dll
+D:\temp\lyrics spicy\TaskbarLyrics\obj\Release\net8.0-windows10.0.19041.0\TaskbarLyrics.csproj.AssemblyReference.cache

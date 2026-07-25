@@ -11,5 +11,10 @@
   "UnsungAlpha": 100,
   "BgLineAlpha": 150,
   "InterludeGapMs": 2500,
-  "GlobalOffsetMs": 0
+  "GlobalOffsetMs": 0,
+  "VizEnabled": true,
+  "VizPreset": "equalizer-taskbar",
+  "VizRandomizeOnTrack": false,
+  "VizHeightFraction": 0.33,
+  "VizOpacity": 0.55
 }
