@@ -50,6 +50,10 @@ public sealed class BridgeServer
     private int _reqCounter;
 
     public volatile SpState? SpotifyState;
+
+    /// <summary>Raised the moment a state push lands, so position/track changes
+    /// apply immediately instead of waiting for the next SMTC poll.</summary>
+    public event Action<SpState>? StateUpdated;
     public bool Connected => _socket is { State: WebSocketState.Open };
 
     /// <summary>Fires when the spicetify extension (re)connects — lets the app retry fallback lyrics.</summary>
@@ -143,6 +147,8 @@ public sealed class BridgeServer
                     Artist = root.TryGetProperty("artist", out var ar) ? ar.GetString() ?? "" : "",
                     ReceivedTick = Stopwatch.GetTimestamp(),
                 };
+                try { StateUpdated?.Invoke(SpotifyState); }
+                catch (Exception ex) { Log.Write($"bridge: state handler threw: {ex.Message}"); }
             }
             else if (type == "resp")
             {

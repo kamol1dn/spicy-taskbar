@@ -3,7 +3,8 @@
 // local WebSocket server and services two request types:
 //   {type:"search", reqId, query}   -> Spotify track search (internal token)
 //   {type:"lyrics", reqId, trackId} -> SpicyLyrics API fetch + objpack unpack
-// It also pushes exact Spotify playback state every 500ms ({type:"sp_state"}),
+// It also pushes exact Spotify playback state every 250ms ({type:"sp_state"}), plus
+// immediately on songchange / play-pause so mix-mode transitions land at once,
 // which the overlay uses for tight sync + direct track IDs when Spotify itself
 // is the player.
 (function SpicyBridge() {
@@ -321,6 +322,34 @@
   // ---------- WebSocket client (dials out to the overlay app) ----------
   let ws = null;
   let pushTimer = null;
+  let eventsBound = false;
+  const PUSH_MS = 250;
+
+  function pushState() {
+    const st = playerState();
+    if (st && ws && ws.readyState === WebSocket.OPEN) {
+      try { ws.send(JSON.stringify(st)); } catch (e) {}
+    }
+  }
+
+  // Push the moment Spotify itself changes state, rather than up to PUSH_MS later.
+  // Mix mode seeks the incoming track to a non-zero start offset as it blends, so the
+  // overlay has to learn the new baseline immediately or it stays behind for the song.
+  function bindPlayerEvents() {
+    if (eventsBound) return;
+    eventsBound = true;
+    try {
+      Spicetify.Player.addEventListener("songchange", () => {
+        pushState();
+        // getProgress() can still report the outgoing track for a tick after the event.
+        setTimeout(pushState, 80);
+        setTimeout(pushState, 300);
+      });
+      Spicetify.Player.addEventListener("onplaypause", pushState);
+    } catch (e) {
+      LOG("could not bind player events: " + describeError(e));
+    }
+  }
 
   async function handleMessage(msg) {
     let req;
@@ -366,12 +395,8 @@
       LOG("connected to overlay app");
       try { ws.send(JSON.stringify({ type: "hello", role: "spicetify", version: extVersion })); } catch (e) {}
       if (pushTimer) clearInterval(pushTimer);
-      pushTimer = setInterval(() => {
-        const st = playerState();
-        if (st && ws && ws.readyState === WebSocket.OPEN) {
-          try { ws.send(JSON.stringify(st)); } catch (e) {}
-        }
-      }, 500);
+      pushTimer = setInterval(pushState, PUSH_MS);
+      bindPlayerEvents();
     };
     ws.onmessage = (ev) => handleMessage(ev.data);
     ws.onclose = () => {

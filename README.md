@@ -54,7 +54,8 @@ dotnet build -c Release
 start bin\Release\net8.0-windows10.0.19041.0\TaskbarLyrics.exe
 ```
 
-Extension install (already done once):
+Extension install (re-run the copy + `spicetify apply` whenever `spicy-bridge.js`
+changes — it only takes effect after Spotify restarts):
 
 ```powershell
 Copy-Item extension\spicy-bridge.js "$env:APPDATA\spicetify\Extensions\"
@@ -118,3 +119,9 @@ Create a shortcut to `TaskbarLyrics.exe` in `shell:startup`
   use via official clients/forks — this is a personal single-user companion. If it
   ever blocks/changes, the LRCLIB path keeps working.
 - Browser position (SMTC) can drift ~0.5s; Spotify position is exact via the bridge.
+- **Mix mode / transitions**: Spotify blends tracks and seeks the incoming one to a
+  non-zero start offset. Windows' media session still names the outgoing track through
+  that blend, and its position is only republished on play/pause/seek — so whenever
+  Spotify owns the session and the bridge is live, its clock and track id win outright.
+  The log notes any `bridge/SMTC disagree` moment. Needs the current `spicy-bridge.js`
+  applied; without it sync still corrects, just up to ~250ms later.

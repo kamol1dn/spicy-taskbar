@@ -11,9 +11,16 @@ public sealed class TrackInfo
     public bool IsSpotify;
     public string? SpotifyTrackId;
 
-    // Identity deliberately excludes SpotifyTrackId/duration — those trickle in
-    // asynchronously and must not look like a track change.
-    public string Key => $"{Title}|{Artist}|{IsSpotify}";
+    /// <summary>Built from a bridge push (Spotify's own state) rather than SMTC metadata.</summary>
+    public bool FromBridge;
+
+    // For SMTC-sourced info the identity deliberately excludes SpotifyTrackId/duration —
+    // those trickle in asynchronously and must not look like a track change. Bridge-sourced
+    // info has the id up front, so it keys on that: during a mix transition Spotify swaps
+    // tracks well before SMTC metadata catches up.
+    public string Key => FromBridge && SpotifyTrackId != null
+        ? $"sp:{SpotifyTrackId}"
+        : $"{Title}|{Artist}|{IsSpotify}";
 }
 
 /// <summary>
@@ -30,13 +37,50 @@ public sealed class SmtcWatcher
     private string? _lastKey;
     private string? _pendingKey;
     private DateTime _pendingSince;
+    private string? _artworkKey;
+    private readonly object _gate = new();
+
+    /// <summary>True while Spotify owns the current SMTC session (set by the poll loop).</summary>
+    private volatile bool _spotifyIsCurrent;
 
     public event Action<TrackInfo?>? TrackChanged;
 
     /// <summary>Raised on a real track change with the album-art bytes (or null when none).</summary>
     public event Action<byte[]?>? ArtworkChanged;
 
-    public SmtcWatcher(BridgeServer bridge) => _bridge = bridge;
+    public SmtcWatcher(BridgeServer bridge)
+    {
+        _bridge = bridge;
+        // Apply Spotify's pushes the instant they land. Waiting for the next 500ms poll
+        // leaves a stale baseline on screen right after a mix transition seeks the
+        // incoming track to a non-zero start offset.
+        _bridge.StateUpdated += OnBridgeState;
+    }
+
+    private void OnBridgeState(SpState sp)
+    {
+        if (!_spotifyIsCurrent) return;
+        PositionEngine.Set(sp.PositionNowMs, sp.Playing);
+
+        if (sp.TrackId == null) return;
+        var info = FromBridge(sp);
+        // Spotify changing track is authoritative and never flickers, so skip the
+        // debounce that exists for browsers rewriting their metadata mid-load.
+        lock (_gate)
+        {
+            if (info.Key != _lastKey) EmitIfChanged(info, immediate: true);
+        }
+    }
+
+    private static TrackInfo FromBridge(SpState sp) => new()
+    {
+        Title = sp.Title,
+        Artist = sp.Artist,
+        DurationMs = sp.DurationMs,
+        IsSpotify = true,
+        SpotifyTrackId = sp.TrackId,
+        FromBridge = true,
+    };
 
     public void Start() => _ = Task.Run(PollLoop);
 
@@ -58,21 +102,28 @@ public sealed class SmtcWatcher
         var session = _mgr!.GetCurrentSession();
         if (session == null)
         {
+            _spotifyIsCurrent = false;
             PositionEngine.Clear();
-            if (EmitIfChanged(null)) ArtworkChanged?.Invoke(null);
+            bool cleared;
+            lock (_gate) cleared = EmitIfChanged(null);
+            if (cleared) { _artworkKey = null; ArtworkChanged?.Invoke(null); }
             return;
         }
 
         var aumid = session.SourceAppUserModelId ?? "";
         var isSpotify = aumid.Contains("spotify", StringComparison.OrdinalIgnoreCase);
+        _spotifyIsCurrent = isSpotify;
 
         var props = await session.TryGetMediaPropertiesAsync();
         var title = props?.Title ?? "";
         var artist = props?.Artist ?? "";
         if (string.IsNullOrWhiteSpace(title))
         {
+            _spotifyIsCurrent = false;
             PositionEngine.Clear();
-            if (EmitIfChanged(null)) ArtworkChanged?.Invoke(null);
+            bool cleared;
+            lock (_gate) cleared = EmitIfChanged(null);
+            if (cleared) { _artworkKey = null; ArtworkChanged?.Invoke(null); }
             return;
         }
 
@@ -84,11 +135,21 @@ public sealed class SmtcWatcher
         var rate = playback?.PlaybackRate ?? 1.0;
 
         var sp = _bridge.SpotifyState;
-        if (isSpotify && sp is { IsFresh: true } && TitlesRoughlyMatch(sp.Title, title))
+        if (isSpotify && sp is { IsFresh: true, TrackId: not null })
         {
-            // Exact position pushed from inside Spotify — use it.
-            info.SpotifyTrackId = sp.TrackId;
-            info.DurationMs = sp.DurationMs;
+            // Spotify's own clock, pushed from inside the app — always authoritative.
+            //
+            // This deliberately does NOT check that the SMTC title matches: during a mix
+            // transition Spotify has already moved to the next track while SMTC still
+            // reports the previous one, and the old title gate dropped us onto SMTC's
+            // timeline for exactly that window. That timeline is only republished on
+            // play/pause/seek, so if the mix started the incoming track at an offset, the
+            // wrong baseline stuck for the rest of the song and merely got extrapolated
+            // forward — which is why pausing or seeking made it snap back into sync.
+            if (title.Length > 0 && !TitlesRoughlyMatch(sp.Title, title))
+                Log.Write($"smtc: bridge/SMTC disagree (bridge \"{sp.Title}\" vs smtc \"{title}\") — trusting bridge");
+
+            info = FromBridge(sp);
             PositionEngine.Set(sp.PositionNowMs, sp.Playing);
         }
         else
@@ -104,7 +165,20 @@ public sealed class SmtcWatcher
             PositionEngine.Set(posMs, playing, rate);
         }
 
-        if (EmitIfChanged(info)) _ = LoadArtworkAsync(props?.Thumbnail);
+        lock (_gate) EmitIfChanged(info);
+
+        // Artwork is tracked separately from the emit: a bridge-driven change (mix
+        // transition) already emitted without ever reaching this poll's thumbnail.
+        // SMTC's metadata lags Spotify there, so wait until it names the same track
+        // before pulling art, or the visualizer would take the previous cover.
+        var artInSync = !isSpotify || sp is not { IsFresh: true } || TitlesRoughlyMatch(sp.Title, title);
+        string? showing;
+        lock (_gate) showing = _lastKey;
+        if (showing != _artworkKey && artInSync)
+        {
+            _artworkKey = showing;
+            _ = LoadArtworkAsync(props?.Thumbnail);
+        }
     }
 
     /// <summary>Read the current track's thumbnail bytes and hand them to the visualizer.</summary>
@@ -136,21 +210,27 @@ public sealed class SmtcWatcher
                b.Contains(a, StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>Returns true when a real (debounced) track change was emitted this call.</summary>
-    private bool EmitIfChanged(TrackInfo? info)
+    /// <summary>
+    /// Returns true when a real (debounced) track change was emitted this call.
+    /// <paramref name="immediate"/> skips the debounce for sources that never flicker.
+    /// </summary>
+    private bool EmitIfChanged(TrackInfo? info, bool immediate = false)
     {
         var key = info?.Key;
         if (key == _lastKey) { _pendingKey = null; return false; }
 
         // Debounce: browsers flicker metadata while loading — require the new
         // identity to hold for 700ms before treating it as a real track change.
-        if (key != _pendingKey)
+        if (!immediate)
         {
-            _pendingKey = key;
-            _pendingSince = DateTime.UtcNow;
-            return false;
+            if (key != _pendingKey)
+            {
+                _pendingKey = key;
+                _pendingSince = DateTime.UtcNow;
+                return false;
+            }
+            if ((DateTime.UtcNow - _pendingSince).TotalMilliseconds < 700) return false;
         }
-        if ((DateTime.UtcNow - _pendingSince).TotalMilliseconds < 700) return false;
 
         _lastKey = key;
         _pendingKey = null;
