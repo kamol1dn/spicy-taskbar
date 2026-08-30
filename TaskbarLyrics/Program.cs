@@ -22,6 +22,7 @@ public static class Program
         var watcher = new SmtcWatcher(bridge);
         var overlay = new OverlayWindow(cfg);
         var viz = new VisualizerWindow(cfg);
+        var appName = new AppNameWindow(cfg);
 
         TrackInfo? lastInfo = null;
         watcher.TrackChanged += info =>
@@ -52,8 +53,9 @@ public static class Program
         watcher.Start();
         overlay.Show();
         viz.SetEnabled(cfg.VizEnabled);
+        appName.SetEnabled(cfg.AppNameEnabled);
 
-        using var tray = new TrayIcon(overlay, viz, app);
+        using var tray = new TrayIcon(cfg, overlay, viz, appName, app);
         app.Run();
     }
 }

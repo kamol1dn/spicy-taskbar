@@ -24,3 +24,8 @@ D:\temp\lyrics spicy\TaskbarLyrics\bin\Release\net8.0-windows10.0.19041.0\NAudio
 D:\temp\lyrics spicy\TaskbarLyrics\bin\Release\net8.0-windows10.0.19041.0\NAudio.WinForms.dll
 D:\temp\lyrics spicy\TaskbarLyrics\bin\Release\net8.0-windows10.0.19041.0\NAudio.WinMM.dll
 D:\temp\lyrics spicy\TaskbarLyrics\obj\Release\net8.0-windows10.0.19041.0\TaskbarLyrics.csproj.AssemblyReference.cache
+d:\temp\tl-buildcheck\TaskbarLyrics.exe
+d:\temp\tl-buildcheck\TaskbarLyrics.deps.json
+d:\temp\tl-buildcheck\TaskbarLyrics.runtimeconfig.json
+d:\temp\tl-buildcheck\TaskbarLyrics.dll
+d:\temp\tl-buildcheck\TaskbarLyrics.pdb

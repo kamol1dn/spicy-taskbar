@@ -36,6 +36,12 @@ public sealed class VisualizerWindow : Window
     public bool Enabled { get; private set; }
     public bool Randomize { get; private set; }
 
+    /// <summary>Screen edge the visualizer grows out of: "top" or "bottom".</summary>
+    public string Edge => _cfg.VizEdge == "top" ? "top" : "bottom";
+
+    /// <summary>Presets all paint bottom-anchored; at the top edge we mirror the surface.</summary>
+    internal bool FlipVertical => Edge == "top";
+
     /// <summary>Global dimming applied to every preset so it reads as a backdrop.</summary>
     internal double MasterOpacity => Math.Clamp(_cfg.VizOpacity, 0.05, 1.0);
 
@@ -107,6 +113,19 @@ public sealed class VisualizerWindow : Window
         if (persist) { _cfg.VizPreset = Preset.Id; _cfg.Save(); }
     }
 
+    /// <summary>Move the visualizer to the "top" or "bottom" screen edge.</summary>
+    public void SetEdge(string edge)
+    {
+        _cfg.VizEdge = edge == "top" ? "top" : "bottom";
+        _cfg.Save();
+        if (Enabled)
+        {
+            Reposition();
+            SendToBottom();
+            _canvas.InvalidateVisual();
+        }
+    }
+
     public void SetRandomize(bool on)
     {
         Randomize = on;
@@ -169,8 +188,11 @@ public sealed class VisualizerWindow : Window
 
     internal VizFrame BuildFrame()
     {
+        var wa = SystemParameters.WorkArea;
         double screenH = SystemParameters.PrimaryScreenHeight;
-        double taskbarH = Math.Max(0, screenH - SystemParameters.WorkArea.Bottom);
+        // Thickness of the taskbar on the edge we're anchored to; when the bar
+        // lives on the other edge we still want a strip to paint into.
+        double taskbarH = Math.Max(0, FlipVertical ? wa.Top : screenH - wa.Bottom);
         if (taskbarH < 6) taskbarH = Math.Min(48, ActualHeight);
         return new VizFrame
         {
@@ -191,10 +213,11 @@ public sealed class VisualizerWindow : Window
         double screenW = SystemParameters.PrimaryScreenWidth;
         double screenH = SystemParameters.PrimaryScreenHeight;
         double h = Math.Max(80, screenH * Math.Clamp(_cfg.VizHeightFraction, 0.15, 0.6));
-        if (Math.Abs(Left) > 0.5 || Math.Abs(Top - (screenH - h)) > 0.5 ||
+        double top = FlipVertical ? 0 : screenH - h;
+        if (Math.Abs(Left) > 0.5 || Math.Abs(Top - top) > 0.5 ||
             Math.Abs(Width - screenW) > 0.5 || Math.Abs(Height - h) > 0.5)
         {
-            Left = 0; Top = screenH - h; Width = screenW; Height = h;
+            Left = 0; Top = top; Width = screenW; Height = h;
         }
     }
 
@@ -246,7 +269,12 @@ public sealed class VizCanvas : FrameworkElement
     {
         if (ActualWidth < 10 || ActualHeight < 10) return;
         dc.PushOpacity(_w.MasterOpacity);
+        // Presets are written bottom-anchored; mirroring the surface makes them
+        // hang off the top edge instead, with no per-preset changes.
+        bool flip = _w.FlipVertical;
+        if (flip) dc.PushTransform(new ScaleTransform(1, -1, 0, ActualHeight / 2));
         _w.Preset.Render(dc, _w.BuildFrame());
+        if (flip) dc.Pop();
         dc.Pop();
     }
 }

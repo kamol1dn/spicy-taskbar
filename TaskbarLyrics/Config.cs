@@ -15,6 +15,9 @@ public sealed class Config
     /// "above" = floating strip just above the taskbar.</summary>
     public string Placement { get; set; } = "taskbar";
 
+    /// <summary>Which screen edge the lyric strip hugs: top | bottom.</summary>
+    public string VPos { get; set; } = "bottom";
+
     /// <summary>left | center | right</summary>
     public string Align { get; set; } = "center";
     public int XOffset { get; set; } = 16;
@@ -23,6 +26,10 @@ public sealed class Config
     public double MainFontPx { get; set; } = 15;
     public double BgFontPx { get; set; } = 10.5;
     public string FontFamily { get; set; } = "Segoe UI Variable Display";
+
+    /// <summary>Drop shadow behind all overlay text. Helps on light wallpapers,
+    /// muddies things on dark ones — toggled from the tray.</summary>
+    public bool TextShadow { get; set; } = true;
 
     public byte SungAlpha { get; set; } = 255;
     public byte UnsungAlpha { get; set; } = 100;
@@ -34,6 +41,25 @@ public sealed class Config
     /// <summary>Extra ms of lead time applied to all lyrics (positive = lyrics earlier).</summary>
     public int GlobalOffsetMs { get; set; } = 0;
 
+    // ---- active-app name module (macOS-menubar style) ----
+
+    /// <summary>Master on/off for the focused-app name strip (toggled from the tray).</summary>
+    public bool AppNameEnabled { get; set; } = false;
+
+    /// <summary>"taskbar" = render on the taskbar itself, "above" = floating strip.</summary>
+    public string AppNamePlacement { get; set; } = "taskbar";
+
+    /// <summary>Which screen edge the app-name strip hugs: top | bottom.</summary>
+    public string AppNameVPos { get; set; } = "top";
+
+    /// <summary>left | center | right</summary>
+    public string AppNameAlign { get; set; } = "left";
+    public int AppNameXOffset { get; set; } = 16;
+    public int AppNameWidth { get; set; } = 260;
+
+    public double AppNameFontPx { get; set; } = 13;
+    public byte AppNameAlpha { get; set; } = 230;
+
     // ---- audio visualizer ----
 
     /// <summary>Master on/off for the taskbar audio visualizer (toggled from the tray).</summary>
@@ -44,6 +70,10 @@ public sealed class Config
 
     /// <summary>Pick a new random preset each time the song changes.</summary>
     public bool VizRandomizeOnTrack { get; set; } = false;
+
+    /// <summary>Which screen edge the visualizer grows out of: top | bottom.
+    /// "top" mirrors every preset vertically, so bars hang down from the edge.</summary>
+    public string VizEdge { get; set; } = "bottom";
 
     /// <summary>How much of the screen height the visualizer surface covers (0.15–0.6);
     /// the "bleed" presets paint upward into this band, taskbar-only presets ignore it.</summary>

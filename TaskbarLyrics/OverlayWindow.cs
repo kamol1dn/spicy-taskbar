@@ -55,45 +55,53 @@ public sealed class OverlayWindow : Window
 
     public void SetLyrics(Lyrics? lyrics) => _canvas.SetLyrics(lyrics);
 
+    public string Placement => _cfg.Placement;
+    /// <summary>Screen edge the strip hugs: "top" or "bottom".</summary>
+    public string VPos => _cfg.VPos == "top" ? "top" : "bottom";
+    /// <summary>Horizontal alignment: "left", "center" or "right".</summary>
+    public string Align => _cfg.Align;
+    /// <summary>Inset in DIPs from the aligned edge (ignored while centered).</summary>
+    public int XOffset => _cfg.XOffset;
+
     public void TogglePlacement()
     {
         _cfg.Placement = _cfg.Placement == "taskbar" ? "above" : "taskbar";
+        _cfg.Save();
         Reposition();
     }
 
-    private void Reposition()
+    /// <summary>Move the strip to the "top" or "bottom" screen edge.</summary>
+    public void SetVPos(string vpos)
     {
-        var wa = SystemParameters.WorkArea;                 // DIPs, excludes taskbar
-        var screenW = SystemParameters.PrimaryScreenWidth;
-        var screenH = SystemParameters.PrimaryScreenHeight;
-        var taskbarH = screenH - wa.Bottom;                 // bottom taskbar assumed
-
-        double h, top;
-        if (_cfg.Placement == "taskbar" && taskbarH >= 24)
-        {
-            h = Math.Min(taskbarH - 2, 48);
-            top = wa.Bottom + (taskbarH - h) / 2;
-        }
-        else
-        {
-            h = 48;
-            top = wa.Bottom - h - 6;
-        }
-
-        var w = Math.Min(_cfg.Width, screenW * 0.62);
-        double left = _cfg.Align switch
-        {
-            "center" => wa.Left + (screenW - w) / 2,
-            "right" => wa.Left + screenW - w - _cfg.XOffset,
-            _ => wa.Left + _cfg.XOffset,
-        };
-
-        if (Math.Abs(Left - left) > 0.5 || Math.Abs(Top - top) > 0.5 ||
-            Math.Abs(Width - w) > 0.5 || Math.Abs(Height - h) > 0.5)
-        {
-            Left = left; Top = top; Width = w; Height = h;
-        }
+        _cfg.VPos = vpos == "top" ? "top" : "bottom";
+        _cfg.Save();
+        Reposition();
     }
+
+    /// <summary>Set horizontal alignment: "left" | "center" | "right".</summary>
+    public void SetAlign(string align)
+    {
+        _cfg.Align = align is "left" or "center" or "right" ? align : "center";
+        _cfg.Save();
+        Reposition();
+        // Alignment also changes where the text sits inside the strip, and a held
+        // line produces an identical frame signature — repaint explicitly.
+        _canvas.InvalidateVisual();
+    }
+
+    /// <summary>Set the inset (DIPs) from the aligned screen edge.</summary>
+    public void SetXOffset(int px)
+    {
+        _cfg.XOffset = Math.Clamp(px, 0, 4000);
+        _cfg.Save();
+        Reposition();
+    }
+
+    /// <summary>Repaint after an appearance change made elsewhere (e.g. the shadow toggle).</summary>
+    public void RefreshAppearance() => _canvas.InvalidateVisual();
+
+    private void Reposition() => StripLayout.Apply(this, StripLayout.Compute(
+        VPos, _cfg.Placement, _cfg.Align, _cfg.XOffset, _cfg.Width, preferredHeight: 48));
 
     // ---- win32: click-through + never-activate + stay above the taskbar ----
 
@@ -314,8 +322,8 @@ public sealed class LyricsCanvas : FrameworkElement
         // skipped frames; here we only shape it.
         var bgEase = _bgAnim * _bgAnim * (3 - 2 * _bgAnim); // smoothstep
 
-        // Content is centered inside the strip so the overlay looks natural
-        // in the taskbar's free space regardless of window alignment.
+        // Content follows the strip's own alignment: left-aligned lyrics start
+        // flush at the left edge, right-aligned end flush at the right.
         if (showDots)
         {
             DrawDots(dc, t, gapStart, gapEnd);
@@ -339,10 +347,10 @@ public sealed class LyricsCanvas : FrameworkElement
                 double centerY = (ActualHeight - ml.Height) / 2;
                 double topY = Math.Max(1, (ActualHeight - ml.Height - _cfg.BgFontPx * 1.45) / 2);
                 double mainY = centerY + (topY - centerY) * bgEase;
-                double mainX = Math.Max(2, (ActualWidth - ml.Width) / 2);
+                double mainX = AlignX(ml.Width, 2);
 
                 if (fade < 1) dc.PushOpacity(0.35 + 0.65 * fade);
-                ml.Draw(dc, mainX, mainY, SweepX(ml, line, t));
+                ml.Draw(dc, mainX, mainY, SweepX(ml, line, t), _cfg.TextShadow);
                 if (fade < 1) dc.Pop();
             }
         }
@@ -380,7 +388,7 @@ public sealed class LyricsCanvas : FrameworkElement
             }
 
             dc.PushOpacity(bgEase);
-            bl.Draw(dc, Math.Max(6, (ActualWidth - bl.Width) / 2), y, x);
+            bl.Draw(dc, AlignX(bl.Width, 6), y, x, _cfg.TextShadow);
             dc.Pop();
         }
         else if (activeBg == null && _bgAnim <= 0.01)
@@ -389,6 +397,10 @@ public sealed class LyricsCanvas : FrameworkElement
             _bgLayout = null;
         }
     }
+
+    /// <summary>X of a <paramref name="contentW"/>-wide row, honouring the configured alignment.</summary>
+    private double AlignX(double contentW, double pad) =>
+        StripLayout.AlignX(_cfg.Align, contentW, ActualWidth, pad);
 
     private static double SweepX(LineLayout ml, LyricLine line, double t)
     {
@@ -416,7 +428,8 @@ public sealed class LyricsCanvas : FrameworkElement
         var progress = Math.Clamp((t - gapStart) / Math.Max(1, gapEnd - gapStart), 0, 1);
         double cy = ActualHeight / 2;
         const double r = 3.2, gap = 15;
-        double x0 = (ActualWidth - 2 * gap) / 2; // center the dot group
+        // The group spans 2 gaps between centers, plus a radius of ink each side.
+        double x0 = AlignX(2 * gap + 2 * r, 2) + r;
         for (int i = 0; i < 3; i++)
         {
             var f = Math.Clamp(progress * 3 - i, 0, 1);
@@ -483,9 +496,9 @@ public sealed class LineLayout
         return layout;
     }
 
-    public void Draw(DrawingContext dc, double x, double y, double sweepX)
+    public void Draw(DrawingContext dc, double x, double y, double sweepX, bool shadow)
     {
-        dc.DrawText(Shadow, new Point(x, y + 1));
+        if (shadow) dc.DrawText(Shadow, new Point(x, y + 1));
         dc.DrawText(Dim, new Point(x, y));
         if (sweepX > 0)
         {
