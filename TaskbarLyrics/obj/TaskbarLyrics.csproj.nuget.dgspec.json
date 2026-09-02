@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "d:\\temp\\lyrics spicy\\TaskbarLyrics\\TaskbarLyrics.csproj": {}
+    "D:\\temp\\lyrics spicy\\TaskbarLyrics\\TaskbarLyrics.csproj": {}
   },
   "projects": {
-    "d:\\temp\\lyrics spicy\\TaskbarLyrics\\TaskbarLyrics.csproj": {
+    "D:\\temp\\lyrics spicy\\TaskbarLyrics\\TaskbarLyrics.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "d:\\temp\\lyrics spicy\\TaskbarLyrics\\TaskbarLyrics.csproj",
+        "projectUniqueName": "D:\\temp\\lyrics spicy\\TaskbarLyrics\\TaskbarLyrics.csproj",
         "projectName": "TaskbarLyrics",
-        "projectPath": "d:\\temp\\lyrics spicy\\TaskbarLyrics\\TaskbarLyrics.csproj",
+        "projectPath": "D:\\temp\\lyrics spicy\\TaskbarLyrics\\TaskbarLyrics.csproj",
         "packagesPath": "C:\\Users\\User\\.nuget\\packages\\",
-        "outputPath": "d:\\temp\\lyrics spicy\\TaskbarLyrics\\obj\\",
+        "outputPath": "D:\\temp\\lyrics spicy\\TaskbarLyrics\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\User\\AppData\\Roaming\\NuGet\\NuGet.Config"
