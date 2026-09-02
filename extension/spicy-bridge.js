@@ -92,22 +92,85 @@
   }
 
   // ---------- Spotify internal access token ----------
-  let tokenCache = null; // { accessToken, expiresAtTime }
+  // The token surface moves between Spotify client versions: `sp://oauth/v2/token`
+  // and `Platform.Session.accessToken` both disappeared in the 1.2.9x line, which is
+  // why every SpicyLyrics fetch started failing with "no spotify token available"
+  // and the overlay silently fell back to line-level LRCLIB lyrics. Probe the known
+  // sources newest-first instead of depending on any single one.
+  let tokenCache = null;   // { accessToken, expiresAtTime }
+  let tokenSource = null;  // name of the probe that last worked
+  let tokenDiagShown = false;
+
+  function normalizeToken(r) {
+    if (!r) return null;
+    const t = typeof r === "string" ? r : (r.accessToken || r.access_token);
+    if (typeof t !== "string" || t.length === 0) return null;
+    const exp = (typeof r === "object" &&
+                 (r.expiresAtTime || r.accessTokenExpirationTimestampMs || r.expires_at)) || 0;
+    // Unknown expiry: re-probe in 15 minutes rather than pinning a stale token forever.
+    return { accessToken: t, expiresAtTime: exp > Date.now() ? exp : Date.now() + 15 * 60_000 };
+  }
+
+  // Each probe resolves to something normalizeToken understands, or null/throws.
+  const TOKEN_PROBES = [
+    ["AuthorizationAPI.getToken", async () => {
+      const api = Spicetify.Platform && Spicetify.Platform.AuthorizationAPI;
+      return api && typeof api.getToken === "function" ? await api.getToken() : null;
+    }],
+    ["AuthorizationAPI._tokenProvider", async () => {
+      const api = Spicetify.Platform && Spicetify.Platform.AuthorizationAPI;
+      const tp = api && api._tokenProvider;
+      if (typeof tp === "function") return await tp({ preferCached: true });
+      if (tp && typeof tp.getToken === "function") return await tp.getToken();
+      return null;
+    }],
+    ["Platform.Session", async () => {
+      const s = Spicetify.Platform && Spicetify.Platform.Session;
+      return s && s.accessToken ? s : null;
+    }],
+    ["cosmos sp://oauth/v2/token", async () =>
+      await Spicetify.CosmosAsync.get("sp://oauth/v2/token")],
+  ];
+
+  // One-time dump of what the client actually exposes, so the next time Spotify
+  // moves this it is diagnosable from the overlay log instead of devtools.
+  function logTokenDiag() {
+    if (tokenDiagShown) return;
+    tokenDiagShown = true;
+    try {
+      const p = Spicetify.Platform || {};
+      const api = p.AuthorizationAPI;
+      LOG("token: no source worked. Platform keys: " +
+          Object.keys(p).filter((k) => /auth|session|token/i.test(k)).join(",") +
+          " | AuthorizationAPI: " + (api ? Object.keys(api).join(",") : "absent"));
+    } catch (e) { /* diagnostics must never throw */ }
+  }
+
   async function getToken() {
     if (tokenCache && tokenCache.expiresAtTime - Date.now() > 60_000) return tokenCache.accessToken;
-    try {
-      const r = await Spicetify.CosmosAsync.get("sp://oauth/v2/token");
-      if (r && r.accessToken) {
-        tokenCache = r;
-        return r.accessToken;
+
+    // Try the source that worked last time first, so refreshes don't re-walk dead APIs.
+    const probes = tokenSource
+      ? TOKEN_PROBES.slice().sort((a, b) => (b[0] === tokenSource) - (a[0] === tokenSource))
+      : TOKEN_PROBES;
+
+    const failures = [];
+    for (const [name, probe] of probes) {
+      try {
+        const tok = normalizeToken(await probe());
+        if (tok) {
+          if (tokenSource !== name) LOG("token: using " + name);
+          tokenSource = name;
+          tokenCache = tok;
+          return tok.accessToken;
+        }
+        failures.push(name + "=empty");
+      } catch (e) {
+        failures.push(name + "=" + ((e && e.message) || e));
       }
-    } catch (e) { /* fall through */ }
-    const s = Spicetify.Platform && Spicetify.Platform.Session;
-    if (s && s.accessToken) {
-      tokenCache = { accessToken: s.accessToken, expiresAtTime: s.accessTokenExpirationTimestampMs || (Date.now() + 30 * 60_000) };
-      return s.accessToken;
     }
-    throw new Error("no spotify token available");
+    logTokenDiag();
+    throw new Error("no spotify token available (" + failures.join("; ") + ")");
   }
 
   // ---------- SpicyLyrics API ----------
