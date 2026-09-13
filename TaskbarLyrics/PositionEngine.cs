@@ -19,6 +19,7 @@ public static class PositionEngine
 
     public static bool HasPosition => _snap != null;
     public static bool Playing => _snap?.Playing ?? false;
+    public static double Rate => _snap?.Rate ?? 1.0;
 
     /// <summary>Current interpolated position in ms, or null when nothing is playing.</summary>
     public static double? NowMs

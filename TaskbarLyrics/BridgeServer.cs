@@ -24,6 +24,8 @@ public sealed class SpState
     public string? TrackId;
     public string Title = "";
     public string Artist = "";
+    public string Album = "";
+    public string? Cover; // https cover URL (i.scdn.co), when the extension sends one
     public long ReceivedTick;
 
     public bool IsFresh => (Stopwatch.GetTimestamp() - ReceivedTick) / (double)Stopwatch.Frequency < 2.5;
@@ -282,6 +284,8 @@ public sealed class BridgeServer
                     TrackId = root.TryGetProperty("trackId", out var tid) ? tid.GetString() : null,
                     Title = root.TryGetProperty("title", out var ti) ? ti.GetString() ?? "" : "",
                     Artist = root.TryGetProperty("artist", out var ar) ? ar.GetString() ?? "" : "",
+                    Album = root.TryGetProperty("album", out var al) && al.ValueKind == JsonValueKind.String ? al.GetString() ?? "" : "",
+                    Cover = root.TryGetProperty("cover", out var cv) && cv.ValueKind == JsonValueKind.String ? cv.GetString() : null,
                     ReceivedTick = Stopwatch.GetTimestamp(),
                 };
                 try { StateUpdated?.Invoke(SpotifyState); }

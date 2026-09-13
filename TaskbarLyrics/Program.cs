@@ -23,6 +23,8 @@ public static class Program
         var overlay = new OverlayWindow(cfg);
         var viz = new VisualizerWindow(cfg);
         var appName = new AppNameWindow(cfg);
+        // Feeds the Wallpaper Engine wallpaper (wallpaper/ folder) over ws://localhost:PORT/wallpaper.
+        var feed = new WallpaperFeed(bridge);
 
         TrackInfo? lastInfo = null;
         watcher.TrackChanged += info =>
@@ -31,13 +33,20 @@ public static class Program
             // Clear immediately so the previous song's lines never linger.
             overlay.Dispatcher.BeginInvoke(() => overlay.SetLyrics(null));
             viz.Dispatcher.BeginInvoke(viz.OnTrackChanged);
+            feed.OnTrackChanged(info);
             service.OnTrackChanged(info);
         };
         // Album art drives the visualizer's gradient colors.
         watcher.ArtworkChanged += bytes =>
+        {
             viz.Dispatcher.BeginInvoke(() => viz.SetArtwork(bytes));
+            feed.OnArtwork(bytes);
+        };
         service.LyricsResolved += lyrics =>
+        {
             overlay.Dispatcher.BeginInvoke(() => overlay.SetLyrics(lyrics));
+            feed.OnLyrics(lyrics);
+        };
 
         // The extension often connects a beat after startup (or after a Spotify
         // restart). Re-resolve the current track then, so a fallback result can

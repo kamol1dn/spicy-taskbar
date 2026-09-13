@@ -7,6 +7,8 @@ public sealed class TrackInfo
 {
     public string Title = "";
     public string Artist = "";
+    public string Album = "";
+    public string? CoverUrl; // https cover from the Spotify bridge; SMTC art arrives via ArtworkChanged
     public double DurationMs;
     public bool IsSpotify;
     public string? SpotifyTrackId;
@@ -76,6 +78,8 @@ public sealed class SmtcWatcher
     {
         Title = sp.Title,
         Artist = sp.Artist,
+        Album = sp.Album,
+        CoverUrl = sp.Cover,
         DurationMs = sp.DurationMs,
         IsSpotify = true,
         SpotifyTrackId = sp.TrackId,
@@ -157,7 +161,7 @@ public sealed class SmtcWatcher
             return;
         }
 
-        var info = new TrackInfo { Title = title, Artist = artist, IsSpotify = isSpotify };
+        var info = new TrackInfo { Title = title, Artist = artist, Album = props?.AlbumTitle ?? "", IsSpotify = isSpotify };
 
         var playback = session.GetPlaybackInfo();
         var playing = playback?.PlaybackStatus ==
