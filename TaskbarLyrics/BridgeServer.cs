@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.IO;
 using System.Net;
 using System.Net.WebSockets;
 using System.Text;
@@ -39,14 +40,42 @@ public sealed class SpState
 }
 
 /// <summary>
-/// Local WebSocket server the spicetify extension dials into.
-/// Provides request/response (search, lyrics) plus the latest pushed Spotify state.
+/// Local WebSocket server with two kinds of client:
+///   * the spicetify extension (path "/") — request/response (search, lyrics) plus
+///     pushed Spotify state; one at a time, a reconnect replaces the old socket.
+///   * viewers (path "/wallpaper") — any number of displays (the wallpaper, one per
+///     monitor, in Wallpaper Engine or Aura) that receive <see cref="Broadcast"/>s and
+///     can ask for a few things hosts other than Wallpaper Engine lack (see WallpaperFeed).
 /// </summary>
 public sealed class BridgeServer
 {
+    /// <summary>A socket plus its send lock: WebSocket allows only one outstanding
+    /// SendAsync, and search/lyrics requests (or broadcasts) can overlap.</summary>
+    private sealed class Conn(WebSocket ws)
+    {
+        public readonly WebSocket Ws = ws;
+        private readonly SemaphoreSlim _send = new(1, 1);
+
+        public async Task SendAsync(byte[] bytes)
+        {
+            await _send.WaitAsync();
+            try { await Ws.SendAsync(bytes, WebSocketMessageType.Text, true, CancellationToken.None); }
+            finally { _send.Release(); }
+        }
+    }
+
+    /// <summary>A connected viewer (one wallpaper instance), as seen by subscribers.</summary>
+    public sealed class Viewer
+    {
+        private readonly Action<object> _send;
+        internal Viewer(Action<object> send) => _send = send;
+        public void Send(object message) => _send(message);
+    }
+
     private readonly int _port;
     private readonly ConcurrentDictionary<string, TaskCompletionSource<JsonElement>> _pending = new();
-    private WebSocket? _socket;
+    private readonly ConcurrentDictionary<Conn, Viewer> _viewers = new();
+    private Conn? _ext;
     private int _reqCounter;
 
     public volatile SpState? SpotifyState;
@@ -54,14 +83,40 @@ public sealed class BridgeServer
     /// <summary>Raised the moment a state push lands, so position/track changes
     /// apply immediately instead of waiting for the next SMTC poll.</summary>
     public event Action<SpState>? StateUpdated;
-    public bool Connected => _socket is { State: WebSocketState.Open };
+    public bool Connected => _ext is { Ws.State: WebSocketState.Open };
 
     /// <summary>Fires when the spicetify extension (re)connects — lets the app retry fallback lyrics.</summary>
     public event Action? ClientConnected;
 
+    /// <summary>Fires when a viewer connects, so it can be brought up to date with a snapshot.</summary>
+    public event Action<Viewer>? ViewerConnected;
+
+    /// <summary>A viewer asked for something (wallpaper folder listing, audio level).</summary>
+    public event Action<Viewer, JsonElement>? ViewerMessage;
+
+    public event Action<Viewer>? ViewerDisconnected;
+
+    public bool HasViewers => !_viewers.IsEmpty;
+
     public BridgeServer(int port) => _port = port;
 
     public void Start() => _ = Task.Run(AcceptLoop);
+
+    /// <summary>Browser pages can open ws://localhost too. Only Spotify may take the
+    /// extension slot (any page could otherwise kick the real extension off and feed
+    /// the overlay its own lyrics); viewers must be local files (Wallpaper Engine) or localhost.</summary>
+    private static bool OriginAllowed(string? origin, bool viewer)
+    {
+        if (string.IsNullOrEmpty(origin) || origin == "null" || origin.StartsWith("file:", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (!Uri.TryCreate(origin, UriKind.Absolute, out var u)) return false;
+        if (u.IsLoopback) return true;
+        // The threat is ordinary web pages. Spotify's own client origin (xpui) is
+        // allowed whatever scheme a given build serves it from.
+        if (u.Scheme is "http" or "https")
+            return !viewer && u.Host.EndsWith("spotify.com", StringComparison.OrdinalIgnoreCase);
+        return !viewer;
+    }
 
     private async Task AcceptLoop()
     {
@@ -83,12 +138,36 @@ public sealed class BridgeServer
                     ctx.Response.Close();
                     continue;
                 }
+
+                var viewer = ctx.Request.Url?.AbsolutePath.TrimEnd('/')
+                    .Equals("/wallpaper", StringComparison.OrdinalIgnoreCase) == true;
+                var origin = ctx.Request.Headers["Origin"];
+                if (!OriginAllowed(origin, viewer))
+                {
+                    Log.Write($"bridge: refused {(viewer ? "viewer" : "extension")} connection from origin {origin}");
+                    ctx.Response.StatusCode = 403;
+                    ctx.Response.Close();
+                    continue;
+                }
+
                 var wsCtx = await ctx.AcceptWebSocketAsync(null);
-                Log.Write("bridge: spicetify extension connected");
-                var old = Interlocked.Exchange(ref _socket, wsCtx.WebSocket);
-                try { old?.Abort(); } catch { }
-                _ = Task.Run(() => ReceiveLoop(wsCtx.WebSocket));
-                _ = Task.Run(() => ClientConnected?.Invoke());
+                var conn = new Conn(wsCtx.WebSocket);
+                if (viewer)
+                {
+                    var v = new Viewer(msg => _ = SendSafeAsync(conn, msg));
+                    _viewers[conn] = v;
+                    Log.Write($"bridge: viewer connected ({_viewers.Count} total, origin {origin ?? "-"})");
+                    _ = Task.Run(() => ReceiveLoop(conn, viewer: true));
+                    _ = Task.Run(() => ViewerConnected?.Invoke(v));
+                }
+                else
+                {
+                    Log.Write($"bridge: spicetify extension connected (origin {origin ?? "-"})");
+                    var old = Interlocked.Exchange(ref _ext, conn);
+                    try { old?.Ws.Abort(); } catch { }
+                    _ = Task.Run(() => ReceiveLoop(conn, viewer: false));
+                    _ = Task.Run(() => ClientConnected?.Invoke());
+                }
             }
             catch (Exception ex)
             {
@@ -98,32 +177,90 @@ public sealed class BridgeServer
         }
     }
 
-    private async Task ReceiveLoop(WebSocket ws)
+    private async Task ReceiveLoop(Conn conn, bool viewer)
     {
+        var ws = conn.Ws;
         var buf = new byte[1 << 16];
-        var sb = new StringBuilder();
+        // Collect raw bytes and decode once per message: decoding each frame on its
+        // own split multi-byte UTF-8 characters that straddled a frame boundary into
+        // U+FFFD — which garbled lyrics payloads (they easily exceed 64 KB).
+        using var msg = new MemoryStream();
         try
         {
             while (ws.State == WebSocketState.Open)
             {
-                sb.Clear();
+                msg.SetLength(0);
                 WebSocketReceiveResult r;
                 do
                 {
                     r = await ws.ReceiveAsync(buf, CancellationToken.None);
                     if (r.MessageType == WebSocketMessageType.Close) return;
-                    sb.Append(Encoding.UTF8.GetString(buf, 0, r.Count));
+                    msg.Write(buf, 0, r.Count);
                 } while (!r.EndOfMessage);
-                HandleMessage(sb.ToString());
+                var text = Encoding.UTF8.GetString(msg.GetBuffer(), 0, (int)msg.Length);
+                if (viewer) HandleViewerMessage(conn, text);
+                else HandleMessage(text);
             }
         }
         catch (Exception ex)
         {
-            Log.Write($"bridge: receive loop ended: {ex.Message}");
+            Log.Write($"bridge: {(viewer ? "viewer" : "extension")} receive loop ended: {ex.Message}");
         }
         finally
         {
-            if (ReferenceEquals(_socket, ws)) _socket = null;
+            if (viewer)
+            {
+                if (_viewers.TryRemove(conn, out var v))
+                {
+                    try { ViewerDisconnected?.Invoke(v); }
+                    catch (Exception ex) { Log.Write($"bridge: viewer-disconnect handler threw: {ex.Message}"); }
+                }
+                Log.Write($"bridge: viewer disconnected ({_viewers.Count} left)");
+            }
+            else
+            {
+                Interlocked.CompareExchange(ref _ext, null, conn);
+            }
+        }
+    }
+
+    private void HandleViewerMessage(Conn conn, string json)
+    {
+        if (!_viewers.TryGetValue(conn, out var v)) return;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            ViewerMessage?.Invoke(v, doc.RootElement.Clone());
+        }
+        catch (Exception ex)
+        {
+            Log.Write($"bridge: bad viewer message: {ex.Message}");
+        }
+    }
+
+    private static readonly JsonSerializerOptions BroadcastJson = new() { IncludeFields = true };
+
+    /// <summary>Send a message to every connected viewer (no-op when there are none).</summary>
+    public void Broadcast(object message)
+    {
+        if (_viewers.IsEmpty) return;
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(message, BroadcastJson);
+        foreach (var conn in _viewers.Keys) _ = SendRawAsync(conn, bytes);
+    }
+
+    private Task SendSafeAsync(Conn conn, object message) =>
+        SendRawAsync(conn, JsonSerializer.SerializeToUtf8Bytes(message, BroadcastJson));
+
+    private async Task SendRawAsync(Conn conn, byte[] bytes)
+    {
+        try
+        {
+            if (conn.Ws.State == WebSocketState.Open) await conn.SendAsync(bytes);
+        }
+        catch
+        {
+            // A dead viewer; its receive loop ends and removes it.
+            try { conn.Ws.Abort(); } catch { }
         }
     }
 
@@ -173,15 +310,14 @@ public sealed class BridgeServer
 
     private async Task<JsonElement?> RequestAsync(object payload, string reqId, int timeoutMs)
     {
-        var ws = _socket;
-        if (ws is not { State: WebSocketState.Open }) return null;
+        var conn = _ext;
+        if (conn is not { Ws.State: WebSocketState.Open }) return null;
 
         var tcs = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
         _pending[reqId] = tcs;
         try
         {
-            var bytes = JsonSerializer.SerializeToUtf8Bytes(payload);
-            await ws.SendAsync(bytes, WebSocketMessageType.Text, true, CancellationToken.None);
+            await conn.SendAsync(JsonSerializer.SerializeToUtf8Bytes(payload));
             var done = await Task.WhenAny(tcs.Task, Task.Delay(timeoutMs));
             return done == tcs.Task ? tcs.Task.Result : null;
         }
