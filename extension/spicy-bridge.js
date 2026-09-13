@@ -451,18 +451,37 @@
   }
 
   // ---------- Player state push ----------
+  // Largest cover Spotify lists for the item, as a fetchable https URL (the
+  // wallpaper uses it; i.scdn.co serves CORS so it can go straight into WebGL).
+  function coverUrl(item) {
+    const imgs = item.images || (item.show && item.show.images) || [];
+    const pick = ["xlarge", "large", "standard", "default", "small"]
+      .map((l) => imgs.find((i) => i && i.label === l))
+      .find(Boolean) || imgs[0];
+    let url = (pick && pick.url) || (item.metadata && item.metadata.image_xlarge_url) || "";
+    if (url.startsWith("spotify:image:")) url = "https://i.scdn.co/image/" + url.slice(14);
+    return url.startsWith("https://") ? url : null;
+  }
+
   function playerState() {
     try {
       const d = Spicetify.Player.data;
       if (!d || !d.item) return null;
+      const uri = d.item.uri || "";
       return {
         type: "sp_state",
         playing: Spicetify.Player.isPlaying(),
         positionMs: Spicetify.Player.getProgress(),
         durationMs: Spicetify.Player.getDuration(),
-        trackId: (d.item.uri || "").split(":")[2] || null,
+        // Only real tracks have a lyrics id. For spotify:local: the third segment is
+        // the URL-encoded artist, and episodes/ads have their own id spaces — sending
+        // those made the overlay query SpicyLyrics with garbage ids.
+        trackId: uri.startsWith("spotify:track:") ? uri.split(":")[2] || null : null,
         title: d.item.name || "",
         artist: (d.item.artists || []).map((a) => a.name).join(", "),
+        album: (d.item.metadata && d.item.metadata.album_title) ||
+               (d.item.album && d.item.album.name) || "",
+        cover: coverUrl(d.item),
         ts: Date.now(),
       };
     } catch (e) {
