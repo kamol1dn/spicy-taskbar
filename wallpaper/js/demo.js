@@ -1,6 +1,7 @@
 // Offline demo (open index.html?demo): fake track + made-up placeholder lyrics that
 // exercise every renderer feature — letter emphasis, a background vocal, a duet
-// line, wrapping, interlude dots — and a "song change" every loop.
+// line, wrapping, interlude dots — and a "song change" every loop. Cover and
+// background are generated stand-ins (demo/). ?at=12000 starts 12 s into the song.
 "use strict";
 
 const Demo = (() => {
@@ -30,17 +31,25 @@ const Demo = (() => {
     return { Type: "Syllable", StartTime: Lines[0].Start, Lines, Bg, Source: "demo" };
   }
 
-  const covers = [
-    "https://i.scdn.co/image/ab67616d0000b273e8b066f70c206551210d902b",
-  ];
+  const asset = (p) => new URL(p, location.href).href;
 
   function start() {
     const lyrics = build();
     const total = lyrics.Lines[lyrics.Lines.length - 1].End + 2500;
-    let t0 = performance.now(), song = 0;
+    const params = new URLSearchParams(location.search);
+    const at = Number(params.get("at")) || 0;
+    // ?still: no CSS transitions, so a headless screenshot catches settled states.
+    if (params.has("still")) {
+      const st = document.createElement("style");
+      st.textContent = "*,*::before,*::after{transition:none!important}";
+      document.head.appendChild(st);
+    }
+    let t0 = performance.now() - at, song = 0;
+    // Stands in for the user's wallpaper folder in "My wallpapers" mode.
+    Background.setFolderFiles([asset("demo/landscape.jpg")]);
     const next = () => {
       song++;
-      setTrack({ title: `Neon Rivers (take ${song})`, artist: "Demo Artist", album: "Placeholder Sessions", cover: covers[song % covers.length], durationMs: total });
+      setTrack({ title: "Neon Rivers", artist: "Demo Artist", album: "Placeholder Sessions", cover: asset("demo/cover.png"), durationMs: total });
       setLyrics("ok", lyrics);
     };
     next();
