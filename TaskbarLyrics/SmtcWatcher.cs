@@ -97,9 +97,39 @@ public sealed class SmtcWatcher
         }
     }
 
+    private static bool IsPlaying(GlobalSystemMediaTransportControlsSession? s)
+    {
+        try { return s?.GetPlaybackInfo()?.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing; }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// Windows' "current" session is just the one that last changed state — a paused
+    /// browser tab (an Instagram reel) regularly takes it while Spotify keeps playing.
+    /// Prefer whatever is actually playing, Spotify first; fall back to "current".
+    /// </summary>
+    private static GlobalSystemMediaTransportControlsSession? PickSession(GlobalSystemMediaTransportControlsSessionManager mgr)
+    {
+        var current = mgr.GetCurrentSession();
+        if (IsPlaying(current)) return current;
+        try
+        {
+            GlobalSystemMediaTransportControlsSession? playing = null;
+            foreach (var s in mgr.GetSessions())
+            {
+                if (!IsPlaying(s)) continue;
+                if (s.SourceAppUserModelId?.Contains("spotify", StringComparison.OrdinalIgnoreCase) == true) return s;
+                playing ??= s;
+            }
+            if (playing != null) return playing;
+        }
+        catch { /* session list unavailable; use current */ }
+        return current;
+    }
+
     private async Task PollOnce()
     {
-        var session = _mgr!.GetCurrentSession();
+        var session = PickSession(_mgr!);
         if (session == null)
         {
             _spotifyIsCurrent = false;
