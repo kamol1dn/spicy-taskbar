@@ -77,6 +77,50 @@ Lyrics and Active app can each sit on the top or bottom edge, left/middle/right,
 taskbar itself or floating just inside the work area, with a pixel offset from the edge.
 The visualizer picks an edge too — at the top it mirrors, so bars hang downward.
 
+## Wallpaper Engine wallpaper
+
+`wallpaper/` is a Wallpaper Engine web wallpaper that renders the lyrics full-screen in
+the Spicy Lyrics style (word/letter karaoke fill, glow, distance blur, interlude dots,
+duet alignment), next to a now-playing card. It connects to the running app as a viewer
+on `ws://localhost:9012/wallpaper` — the app pushes track, lyrics, artwork and position.
+
+Install: link the folder into Wallpaper Engine's projects, then pick **Spicy Wallpaper**
+under *My Wallpapers*:
+
+```powershell
+New-Item -ItemType Junction -Path "<wallpaper_engine>\projects\myprojects\spicy-wallpaper" -Target "$PWD\wallpaper"
+```
+
+Properties (Wallpaper Engine sidebar):
+
+- **Background**: *My wallpapers* shows a random image from the chosen **Wallpaper folder**
+  on every song change (shuffle-bag, no repeats; **Collection** filters by folder or
+  `prefix_` of the filename). *Dynamic album gradient* is spicy-lyrics' animated,
+  bass-reactive blurred cover. With no folder picked it falls back to the gradient.
+- Blur / zoom drift / darken, layout (cover + lyrics, or lyrics only), lyrics size, active
+  line height, distant-line blur, lyrics offset, idle clock, and the app's port.
+
+Without the app running it still works through Wallpaper Engine's own media integration
+(card, cover gradient, per-song wallpapers) — just no lyrics. `index.html?demo` in a
+browser plays a built-in demo song.
+
+### Aura Wallpaper (desktop + lock screen)
+
+Aura shows local HTML on both surfaces, so there are two entry points:
+
+| surface | file | layout |
+|---|---|---|
+| Desktop | `wallpaper/index.html` | cover card + lyrics |
+| Lock screen | `wallpaper/lockscreen.html` | lyrics centred under Windows' clock, now-playing strip bottom-left |
+
+In Aura: *Desktop Wallpaper* / *Lockscreen Wallpaper* → **File** → pick the file.
+Aura has no settings panel, so settings live in `wallpaper/config.js` (with a
+`lockscreen: {...}` block of overrides); any key also works as a URL parameter
+(`index.html?background=dynamic`). What Wallpaper Engine would provide comes from
+TaskbarLyrics over the bridge instead: the image folder is listed by the app
+(`folder` in config.js), and the bass level is streamed from its loopback analyser
+while a wallpaper asks for it. Run only one of Wallpaper Engine / Aura on the desktop.
+
 ## Config
 
 `config.json` next to the exe (created on first run):
