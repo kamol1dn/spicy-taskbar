@@ -1,6 +1,7 @@
-// Settings for hosts without a settings panel (Aura Wallpaper, a browser).
-// In Wallpaper Engine its own property panel overrides these.
+// Starting defaults. Normally you change the look from TaskbarLyrics' tray icon
+// (right-click -> Wallpaper), which overrides these and is remembered by the page.
 // Any key can also be given in the URL: index.html?background=dynamic&lyricssize=120
+// (Wallpaper Engine's own property panel works too.)
 window.WALLPAPER_CONFIG = {
   // "wallpapers" = random image from `folder` on every song change, "dynamic" = album gradient
   background: "wallpapers",

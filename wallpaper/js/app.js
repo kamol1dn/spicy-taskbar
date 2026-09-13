@@ -28,23 +28,34 @@ const settings = {
 // Wallpaper Engine injects its APIs before page scripts run; anything else (Aura,
 // a browser) gets folder listing and audio from TaskbarLyrics over the bridge.
 const IN_WE = typeof window.wallpaperRegisterAudioListener === "function";
+const IS_LOCK = window.WALLPAPER_SURFACE === "lockscreen";
+let weFolder = false; // images come from Wallpaper Engine's folder picker
 
-// config.js, then URL parameters (?background=dynamic&lyricssize=120). Values are
-// coerced to the type of the default so "false"/"120" come out as bool/number.
+// Values are coerced to the type of the default, so "false"/"120" become bool/number.
+function setKey(key, raw) {
+  if (!(key in settings) || raw === undefined || raw === null) return;
+  const def = settings[key];
+  if (typeof def === "boolean") settings[key] = raw === true || raw === "true" || raw === "1";
+  else if (typeof def === "number") { const n = Number(raw); if (!Number.isNaN(n)) settings[key] = n; }
+  else settings[key] = String(raw);
+}
+
+// The tray's "Wallpaper" menu (TaskbarLyrics) is where settings are changed. The last
+// ones received are remembered per surface, so the look holds while the app is closed
+// (e.g. the lock screen before login).
+const TRAY_CACHE = "spicywp.tray." + (IS_LOCK ? "lockscreen" : "desktop");
+
+// Order: built-in defaults < config.js < URL parameters < tray settings.
 (function loadConfig() {
-  const apply = (key, raw) => {
-    if (!(key in settings)) return;
-    const def = settings[key];
-    if (typeof def === "boolean") settings[key] = raw === true || raw === "true" || raw === "1";
-    else if (typeof def === "number") { const n = Number(raw); if (!Number.isNaN(n)) settings[key] = n; }
-    else settings[key] = String(raw);
-  };
-  const lock = window.WALLPAPER_SURFACE === "lockscreen";
-  if (lock) { settings.layout = "lock"; settings.clock = false; }
+  if (IS_LOCK) { settings.layout = "lock"; settings.clock = false; }
   const cfg = window.WALLPAPER_CONFIG || {};
-  for (const k of Object.keys(cfg)) apply(k, cfg[k]);
-  if (lock && cfg.lockscreen) for (const k of Object.keys(cfg.lockscreen)) apply(k, cfg.lockscreen[k]);
-  for (const [k, v] of new URLSearchParams(location.search)) apply(k, v);
+  for (const k of Object.keys(cfg)) setKey(k, cfg[k]);
+  if (IS_LOCK && cfg.lockscreen) for (const k of Object.keys(cfg.lockscreen)) setKey(k, cfg.lockscreen[k]);
+  for (const [k, v] of new URLSearchParams(location.search)) setKey(k, v);
+  try {
+    const tray = JSON.parse(localStorage.getItem(TRAY_CACHE) || "null");
+    if (tray) for (const k of Object.keys(tray)) setKey(k, tray[k]);
+  } catch (e) {}
 })();
 
 function applySettings() {
@@ -85,7 +96,9 @@ window.wallpaperPropertyListener = {
     if (!paused) requestAnimationFrame(loop);
   },
   userDirectoryFilesAddedOrChanged(prop, files) {
-    if (prop === "wallpaperfolder") Background.addFiles(files);
+    if (prop !== "wallpaperfolder") return;
+    weFolder = true; // Wallpaper Engine's own folder picker wins over the tray's folder
+    Background.addFiles(files);
   },
   userDirectoryFilesRemoved(prop, files) {
     if (prop === "wallpaperfolder") Background.removeFiles(files);
@@ -219,6 +232,8 @@ const Bridge = (() => {
         case "pos": if (m.has) Clock.update(m.ms, m.playing, m.rate); break;
         case "wallpapers": gotWallpaperList(m); break;
         case "audio": Background.setAudioLevel(Math.min(1, (m.bass || 0) * 1.1)); break;
+        case "settings": gotTraySettings(m); break;
+        case "next-wallpaper": Background.songChanged(); break;
       }
     };
   }
@@ -227,31 +242,49 @@ const Bridge = (() => {
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
   }
 
-  // What Wallpaper Engine would otherwise provide: the image folder (when no folder
-  // was picked in its panel) and the audio level.
+  // What Wallpaper Engine would otherwise provide: the image folder (unless one was
+  // picked in its panel) and the audio level.
   function requestExtras() {
-    if (settings.folder && !Background.hasFolderFiles) send({ type: "list-wallpapers", dir: settings.folder });
+    requestFolder();
+    requestAudio();
+  }
+  function requestFolder() {
+    if (!weFolder && settings.folder) send({ type: "list-wallpapers", dir: settings.folder });
+  }
+  function requestAudio() {
     if (!IN_WE) send({ type: "audio", on: !!settings.audioreactive });
   }
 
   return {
     start: connect,
     reconnect() { if (ws) { try { ws.onclose = null; ws.close(); } catch (e) {} } connected = false; connect(); },
-    requestExtras,
+    requestFolder,
+    requestAudio,
     get connected() { return connected; },
   };
 })();
+
+// ---------------- tray settings ----------------
+function gotTraySettings(m) {
+  const mine = Object.assign({}, IS_LOCK ? m.lockscreen : m.desktop, { folder: m.folder || "" });
+  const prevFolder = settings.folder, prevAudio = settings.audioreactive;
+  for (const k of Object.keys(mine)) setKey(k, mine[k]);
+  try { localStorage.setItem(TRAY_CACHE, JSON.stringify(mine)); } catch (e) {}
+  applySettings();
+  if (settings.folder !== prevFolder) Bridge.requestFolder();
+  if (settings.audioreactive !== prevAudio) Bridge.requestAudio();
+}
 
 // ---------------- wallpaper folder via the bridge (non-WE hosts) ----------------
 // Remember the last listing so wallpapers still rotate while TaskbarLyrics is closed.
 const LIST_CACHE = "spicywp.folderList";
 function gotWallpaperList(m) {
-  if (!m.files || !m.files.length) {
-    if (m.error) console.warn("wallpaper folder:", m.dir, m.error);
-    return;
+  if (weFolder || m.dir !== settings.folder) return; // stale answer for a previous folder
+  if (m.error) console.warn("wallpaper folder:", m.dir, m.error);
+  Background.setFolderFiles(m.files || []);
+  if (m.files && m.files.length) {
+    try { localStorage.setItem(LIST_CACHE, JSON.stringify({ dir: m.dir, files: m.files })); } catch (e) {}
   }
-  Background.setFolderFiles(m.files);
-  try { localStorage.setItem(LIST_CACHE, JSON.stringify({ dir: m.dir, files: m.files })); } catch (e) {}
 }
 (function restoreListing() {
   if (IN_WE || !settings.folder) return;

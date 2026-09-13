@@ -395,7 +395,6 @@ const Background = (() => {
       bag = [];
       this.addFiles(list);
     },
-    get hasFolderFiles() { return files.size > 0; },
     /** New song: next wallpaper from the pack (wallpaper mode only). */
     songChanged() {
       if (effectiveMode() === "wallpapers") showWallpaper(nextPath());
