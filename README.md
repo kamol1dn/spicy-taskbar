@@ -77,9 +77,9 @@ Lyrics and Active app can each sit on the top or bottom edge, left/middle/right,
 taskbar itself or floating just inside the work area, with a pixel offset from the edge.
 The visualizer picks an edge too — at the top it mirrors, so bars hang downward.
 
-## Wallpaper Engine wallpaper
+## Wallpaper (Wallpaper Engine / Aura)
 
-`wallpaper/` is a Wallpaper Engine web wallpaper that renders the lyrics full-screen in
+`wallpaper/` is a web wallpaper that renders the lyrics full-screen in
 the Spicy Lyrics style (word/letter karaoke fill, glow, distance blur, interlude dots,
 duet alignment), next to a now-playing card. It connects to the running app as a viewer
 on `ws://localhost:9012/wallpaper` — the app pushes track, lyrics, artwork and position.
@@ -114,12 +114,18 @@ Aura shows local HTML on both surfaces, so there are two entry points:
 | Lock screen | `wallpaper/lockscreen.html` | lyrics centred under Windows' clock, now-playing strip bottom-left |
 
 In Aura: *Desktop Wallpaper* / *Lockscreen Wallpaper* → **File** → pick the file.
-Aura has no settings panel, so settings live in `wallpaper/config.js` (with a
-`lockscreen: {...}` block of overrides); any key also works as a URL parameter
-(`index.html?background=dynamic`). What Wallpaper Engine would provide comes from
-TaskbarLyrics over the bridge instead: the image folder is listed by the app
-(`folder` in config.js), and the bass level is streamed from its loopback analyser
+What Wallpaper Engine would provide comes from TaskbarLyrics over the bridge instead:
+the app lists the image folder, and streams the bass level from its loopback analyser
 while a wallpaper asks for it. Run only one of Wallpaper Engine / Aura on the desktop.
+
+### Wallpaper settings
+
+Right-click the tray icon → **Wallpaper**: next image, image folder, and a **Desktop**
+and a **Lock screen** submenu (background, collection, layout, lyrics size, darkening,
+blur, toggles). Changes are saved to `config.json` and applied to open wallpapers
+immediately; each page also remembers the last settings for when the app isn't running.
+`wallpaper/config.js` (or URL parameters like `index.html?background=dynamic`) only
+provides the starting defaults.
 
 ## Config
 
@@ -138,7 +144,8 @@ while a wallpaper asks for it. Run only one of Wallpaper Engine / Aura on the de
 | `AppNameFontPx` / `AppNameAlpha` / `AppNameWidth` | appearance of the app-name strip |
 | `MainFontPx` / `BgFontPx` | font sizes for main + filler rows |
 | `TextShadow` | drop shadow behind all overlay text — turn off on dark wallpapers |
-| `GlobalOffsetMs` | sync nudge, positive = lyrics earlier |
+| `GlobalOffsetMs` | sync nudge, positive = lyrics earlier (taskbar and wallpaper) |
+| `WallpaperFolder` / `WallpaperDesktop` / `WallpaperLock` | wallpaper settings — set from the tray |
 | `InterludeGapMs` | min instrumental gap before the ● ● ● dots |
 
 Tray icon (♪), one submenu per module:
@@ -146,6 +153,7 @@ Tray icon (♪), one submenu per module:
 - **Lyrics position** — top/bottom, left/middle/right, edge offset, on-taskbar
 - **Active app** — on/off, same position options, font size
 - **Visualizer** — on/off, top/bottom edge, randomize, preset
+- **Wallpaper** — next image, folder, desktop / lock-screen look (see above)
 
 …plus **Text shadow** (applies to every module), open log, clear lyrics cache, exit. Everything picked from the tray is saved to `config.json`.
 
