@@ -71,7 +71,9 @@ after Spotify restarts. The log (`%LOCALAPPDATA%\TaskbarLyrics\log.txt`) then sh
 **3. The wallpaper (optional).** Unzip `SpicyWallpaper.zip` somewhere permanent, then:
 
 - **Aura Wallpaper** — *Desktop Wallpaper* → **File** → `index.html`, and
-  *Lockscreen Wallpaper* → **File** → `lockscreen.html`.
+  *Lockscreen Wallpaper* → **File** → `lockscreen.html`. On Windows 11 24H2+ Aura's
+  wallpaper vanishes behind the static picture after a virtual-desktop switch; the app
+  puts it back on top, so keep TaskbarLyrics running.
 - **Wallpaper Engine** — link the folder into its projects, then pick **Spicy Wallpaper**
   under *My Wallpapers* (edits to the folder show up live):
   ```powershell

@@ -63,6 +63,9 @@ public static class Program
         overlay.Start();
         viz.SetEnabled(cfg.VizEnabled);
         appName.SetEnabled(cfg.AppNameEnabled);
+        // Aura's wallpaper gets buried under Explorer's static picture on every virtual-desktop switch.
+        using var layers = new DesktopLayerGuard();
+        layers.Start();
 
         using var tray = new TrayIcon(cfg, overlay, viz, appName, feed, app);
         app.Run();
