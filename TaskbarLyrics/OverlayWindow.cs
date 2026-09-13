@@ -18,6 +18,15 @@ public sealed class OverlayWindow : Window
     private readonly Config _cfg;
     private readonly LyricsCanvas _canvas;
     private readonly System.Windows.Threading.DispatcherTimer _maintain;
+    private readonly ForegroundWatcher _foreground = new();
+    private bool _onDesktop;
+    private bool _shown;
+
+    /// <summary>Tray "Enabled".</summary>
+    public bool Enabled => _cfg.LyricsEnabled;
+
+    /// <summary>Tray "Hide while the desktop is showing".</summary>
+    public bool HideOnDesktop => _cfg.LyricsHideOnDesktop;
 
     public OverlayWindow(Config cfg)
     {
@@ -42,7 +51,7 @@ public sealed class OverlayWindow : Window
         // drops a continuous full-refresh-rate repaint to near zero.
         CompositionTarget.Rendering += (_, _) =>
         {
-            if (_canvas.Tick()) _canvas.InvalidateVisual();
+            if (_shown && _canvas.Tick()) _canvas.InvalidateVisual();
         };
 
         _maintain = new System.Windows.Threading.DispatcherTimer
@@ -50,10 +59,63 @@ public sealed class OverlayWindow : Window
             Interval = TimeSpan.FromSeconds(2)
         };
         _maintain.Tick += (_, _) => { Reposition(); ReassertTopmost(); };
-        _maintain.Start();
+
+        _foreground.DesktopChanged += onDesktop => Dispatcher.BeginInvoke(() =>
+        {
+            Log.Write(onDesktop ? "overlay: desktop focused, hiding lyrics" : "overlay: left the desktop, showing lyrics");
+            _onDesktop = onDesktop;
+            UpdateVisibility();
+        });
     }
 
     public void SetLyrics(Lyrics? lyrics) => _canvas.SetLyrics(lyrics);
+
+    // ---- enable / hide-on-desktop (tray) ----
+
+    /// <summary>Show the strip per config — called once at startup instead of Show().</summary>
+    public void Start() => UpdateVisibility();
+
+    public void SetEnabled(bool on)
+    {
+        _cfg.LyricsEnabled = on;
+        _cfg.Save();
+        UpdateVisibility();
+    }
+
+    public void SetHideOnDesktop(bool on)
+    {
+        _cfg.LyricsHideOnDesktop = on;
+        _cfg.Save();
+        UpdateVisibility();
+    }
+
+    private void UpdateVisibility()
+    {
+        // The foreground hook only runs while its answer can change anything.
+        if (Enabled && HideOnDesktop) _foreground.Start();
+        else { _foreground.Stop(); _onDesktop = false; }
+
+        var show = Enabled && !(HideOnDesktop && _onDesktop);
+        if (show == _shown) return;
+        _shown = show;
+        if (show)
+        {
+            // Fade from 0 explicitly, so the last frame never flashes at full strength.
+            BeginAnimation(OpacityProperty, new System.Windows.Media.Animation.DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(180)));
+            Show();
+            Reposition();
+            ReassertTopmost();
+            _maintain.Start();
+            _canvas.InvalidateVisual();
+        }
+        else
+        {
+            _maintain.Stop();
+            var fade = new System.Windows.Media.Animation.DoubleAnimation(0, TimeSpan.FromMilliseconds(180));
+            fade.Completed += (_, _) => { if (!_shown) Hide(); };
+            BeginAnimation(OpacityProperty, fade);
+        }
+    }
 
     public string Placement => _cfg.Placement;
     /// <summary>Screen edge the strip hugs: "top" or "bottom".</summary>

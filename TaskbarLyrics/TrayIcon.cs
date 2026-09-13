@@ -125,10 +125,20 @@ public sealed class TrayIcon : IDisposable
         };
     }
 
-    /// <summary>"Lyrics position" submenu: screen edge, alignment, offset, taskbar/floating.</summary>
+    /// <summary>"Lyrics" submenu: on/off, hide-on-desktop, then edge, alignment, offset, taskbar/floating.</summary>
     private static Forms.ToolStripMenuItem BuildLyricsMenu(OverlayWindow overlay)
     {
-        var root = new Forms.ToolStripMenuItem("Lyrics position");
+        var root = new Forms.ToolStripMenuItem("Lyrics");
+
+        var enabled = new Forms.ToolStripMenuItem("Enabled", null,
+            (_, _) => overlay.Dispatcher.BeginInvoke(() => overlay.SetEnabled(!overlay.Enabled)));
+        // With the lyrics wallpaper up, the desktop already shows the lyrics full-screen.
+        var hideOnDesktop = new Forms.ToolStripMenuItem("Hide while the desktop is showing", null,
+            (_, _) => overlay.Dispatcher.BeginInvoke(() => overlay.SetHideOnDesktop(!overlay.HideOnDesktop)));
+        root.DropDownItems.Add(enabled);
+        root.DropDownItems.Add(hideOnDesktop);
+        root.DropDownItems.Add(new Forms.ToolStripSeparator());
+
         var refresh = AddPositionItems(root, new PositionModule(
             overlay.Dispatcher,
             () => overlay.VPos, overlay.SetVPos,
@@ -136,7 +146,13 @@ public sealed class TrayIcon : IDisposable
             () => overlay.XOffset, overlay.SetXOffset,
             () => overlay.Placement, overlay.TogglePlacement));
 
-        root.DropDownOpening += (_, _) => refresh();
+        root.DropDownOpening += (_, _) =>
+        {
+            enabled.Checked = overlay.Enabled;
+            hideOnDesktop.Checked = overlay.HideOnDesktop;
+            hideOnDesktop.Enabled = overlay.Enabled;
+            refresh();
+        };
         return root;
     }
 

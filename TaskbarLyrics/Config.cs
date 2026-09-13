@@ -11,6 +11,13 @@ public sealed class Config
 {
     public int Port { get; set; } = 9012;
 
+    /// <summary>Master on/off for the taskbar lyrics strip (toggled from the tray).</summary>
+    public bool LyricsEnabled { get; set; } = true;
+
+    /// <summary>Hide the strip while the desktop itself has focus (Win+D, clicking the
+    /// wallpaper) — the lyrics wallpaper already shows them there.</summary>
+    public bool LyricsHideOnDesktop { get; set; } = false;
+
     /// <summary>"taskbar" = render on the taskbar itself (left side).
     /// "above" = floating strip just above the taskbar.</summary>
     public string Placement { get; set; } = "taskbar";

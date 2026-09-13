@@ -60,7 +60,7 @@ public static class Program
 
         bridge.Start();
         watcher.Start();
-        overlay.Show();
+        overlay.Start();
         viz.SetEnabled(cfg.VizEnabled);
         appName.SetEnabled(cfg.AppNameEnabled);
 
