@@ -27,5 +27,32 @@
   "VizRandomizeOnTrack": false,
   "VizEdge": "bottom",
   "VizHeightFraction": 0.33,
-  "VizOpacity": 0.55
+  "VizOpacity": 0.55,
+  "WallpaperFolder": "C:\\Users\\User\\Pictures\\Wallpapers",
+  "WallpaperDesktop": {
+    "Background": "wallpapers",
+    "Collection": "all",
+    "Layout": "split",
+    "LyricsSize": 100,
+    "Dim": 35,
+    "WallpaperBlur": 0,
+    "KenBurns": true,
+    "AudioReactive": true,
+    "LineBlur": true,
+    "SpicyFont": true,
+    "Clock": true
+  },
+  "WallpaperLock": {
+    "Background": "wallpapers",
+    "Collection": "all",
+    "Layout": "lock",
+    "LyricsSize": 100,
+    "Dim": 45,
+    "WallpaperBlur": 0,
+    "KenBurns": true,
+    "AudioReactive": true,
+    "LineBlur": true,
+    "SpicyFont": true,
+    "Clock": false
+  }
 }
