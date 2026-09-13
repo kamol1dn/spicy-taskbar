@@ -491,9 +491,33 @@
 
   // ---------- WebSocket client (dials out to the overlay app) ----------
   let ws = null;
-  let pushTimer = null;
+  let stopPushing = null;
   let eventsBound = false;
   const PUSH_MS = 250;
+
+  // Chromium throttles main-thread timers while Spotify's window is hidden or
+  // minimised, which starved the 250ms push (the overlay saw the state go stale a
+  // couple of seconds after every song change). Timers inside a dedicated worker
+  // aren't throttled that way, so tick from one; a main-thread interval stays as
+  // the safety net in case the worker can't be created or stops ticking.
+  function startPushing() {
+    if (stopPushing) stopPushing();
+    let lastTick = 0;
+    const tick = () => { lastTick = Date.now(); pushState(); };
+    const stops = [];
+    try {
+      const url = URL.createObjectURL(new Blob(
+        ["setInterval(function(){postMessage(0)}," + PUSH_MS + ");"], { type: "text/javascript" }));
+      const worker = new Worker(url);
+      worker.onmessage = tick;
+      stops.push(() => { worker.terminate(); URL.revokeObjectURL(url); });
+    } catch (e) {
+      LOG("push worker unavailable, main-thread timer only: " + describeError(e));
+    }
+    const id = setInterval(() => { if (Date.now() - lastTick > PUSH_MS * 3) tick(); }, PUSH_MS);
+    stops.push(() => clearInterval(id));
+    stopPushing = () => { stops.forEach((s) => s()); stopPushing = null; };
+  }
 
   function pushState() {
     const st = playerState();
@@ -564,13 +588,12 @@
     ws.onopen = () => {
       LOG("connected to overlay app");
       try { ws.send(JSON.stringify({ type: "hello", role: "spicetify", version: extVersion })); } catch (e) {}
-      if (pushTimer) clearInterval(pushTimer);
-      pushTimer = setInterval(pushState, PUSH_MS);
+      startPushing();
       bindPlayerEvents();
     };
     ws.onmessage = (ev) => handleMessage(ev.data);
     ws.onclose = () => {
-      if (pushTimer) { clearInterval(pushTimer); pushTimer = null; }
+      if (stopPushing) stopPushing();
       setTimeout(connect, 3000);
     };
     ws.onerror = () => { /* onclose fires next */ };
