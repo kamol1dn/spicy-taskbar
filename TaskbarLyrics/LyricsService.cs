@@ -175,7 +175,12 @@ public sealed class LyricsService
 
     private async Task<Lyrics?> FetchSpicyAsync(string trackId, CancellationToken ct)
     {
-        for (var attempt = 0; attempt < 4; attempt++)
+        // 503 = the server queued the request and is generating the lyrics. Poll on
+        // spicy-lyrics' own schedule (2s, x1.5 per try, capped at 10s — LyricsQueueRetry.ts)
+        // for up to ~45s; the track-change CancellationToken ends it early. The old
+        // 4 x 5s budget often gave up just before a queued track was ready and settled
+        // for line-level LRCLIB lyrics.
+        for (var attempt = 0; attempt < 8; attempt++)
         {
             ct.ThrowIfCancellationRequested();
             var (status, json) = await _bridge.LyricsAsync(trackId);
@@ -183,9 +188,9 @@ public sealed class LyricsService
                 return LyricsNormalizer.FromSpicy(j);
             if (status == 503)
             {
-                // Server queued the request — poll again shortly.
-                Log.Write("resolve: spicy queued (503), retrying...");
-                await Task.Delay(5000, ct);
+                var delay = (int)Math.Min(10_000, 2000 * Math.Pow(1.5, attempt));
+                Log.Write($"resolve: spicy queued (503), retrying in {delay / 1000.0:0.#}s...");
+                await Task.Delay(delay, ct);
                 continue;
             }
             if (status != 0) Log.Write($"resolve: spicy status {status}");
