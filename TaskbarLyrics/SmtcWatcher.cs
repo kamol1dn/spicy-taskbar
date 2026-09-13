@@ -165,6 +165,13 @@ public sealed class SmtcWatcher
         var rate = playback?.PlaybackRate ?? 1.0;
 
         var sp = _bridge.SpotifyState;
+        // Chromium throttles the extension's push timer while Spotify's window is in the
+        // background, so pushes can stop between song-change/play-pause events and the state
+        // goes stale. While SMTC still names the song the bridge last reported, keep the
+        // bridge's identity (track id, full artist list): otherwise the key flipped from
+        // "sp:<id>" to "Title|Artist" a few seconds into every song, re-resolving the lyrics
+        // and looking like a brand-new track to the wallpaper.
+        var bridgeSameSong = isSpotify && sp is { TrackId: not null } && TitlesRoughlyMatch(sp.Title, title);
         if (isSpotify && sp is { IsFresh: true, TrackId: not null })
         {
             // Spotify's own clock, pushed from inside the app — always authoritative.
@@ -193,6 +200,7 @@ public sealed class SmtcWatcher
             }
             info.DurationMs = tl.EndTime.TotalMilliseconds;
             PositionEngine.Set(posMs, playing, rate);
+            if (bridgeSameSong) info = FromBridge(sp!); // identity only; position stays SMTC's
         }
 
         lock (_gate) EmitIfChanged(info);
