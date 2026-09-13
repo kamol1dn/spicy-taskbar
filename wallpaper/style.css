@@ -141,7 +141,9 @@ body.nodur .progress { display: none; }
   min-width: 0;
   overflow: hidden;
   font-size: var(--fs);
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 13%, #000 80%, transparent 100%);
+  /* Fully clear bands at both edges: a line scrolled just past the edge must not
+     leave its descenders peeking in through a barely-opaque mask. */
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, transparent 3%, #000 14%, #000 80%, transparent 97%);
 }
 #lyricsContent { position: absolute; left: 0; right: 0; top: 0; padding: 0 0.25em; will-change: transform; }
 
@@ -241,7 +243,7 @@ body[data-layout="lock"] #lyrics {
   left: 12vw; right: 12vw;
   top: 36vh; bottom: 16vh;
   height: auto;
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 16%, #000 78%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, transparent 5%, #000 18%, #000 78%, transparent 96%);
 }
 body[data-layout="lock"] .line,
 body[data-layout="lock"] .row.opp .line { justify-content: center; text-align: center; }
