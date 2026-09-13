@@ -6,18 +6,19 @@ using Forms = System.Windows.Forms;
 
 namespace TaskbarLyrics;
 
-/// <summary>Tray icon: per-module position/appearance menus, open log, clear cache, exit.</summary>
+/// <summary>Tray icon: per-module position/appearance menus, wallpaper settings, open log, clear cache, exit.</summary>
 public sealed class TrayIcon : IDisposable
 {
     private readonly Forms.NotifyIcon _icon;
 
     public TrayIcon(Config cfg, OverlayWindow overlay, VisualizerWindow viz, AppNameWindow appName,
-        Application app)
+        WallpaperFeed feed, Application app)
     {
         var menu = new Forms.ContextMenuStrip();
         menu.Items.Add(BuildLyricsMenu(overlay));
         menu.Items.Add(BuildAppNameMenu(appName));
         menu.Items.Add(BuildVisualizerMenu(viz));
+        menu.Items.Add(BuildWallpaperMenu(cfg, feed));
         menu.Items.Add(new Forms.ToolStripSeparator());
 
         // Applies to every module's text — handy to flip when the wallpaper changes.
@@ -219,6 +220,116 @@ public sealed class TrayIcon : IDisposable
                 item.Checked = viz.Preset.Id == id;
         };
 
+        return root;
+    }
+
+    /// <summary>
+    /// "Wallpaper" submenu: next image, image folder, and one look submenu per surface
+    /// (desktop / lock screen). Changes are saved to config.json and pushed straight to
+    /// every open wallpaper, which also remembers them for when the app isn't running.
+    /// </summary>
+    private static Forms.ToolStripMenuItem BuildWallpaperMenu(Config cfg, WallpaperFeed feed)
+    {
+        var root = new Forms.ToolStripMenuItem("Wallpaper");
+        void Changed()
+        {
+            cfg.Save();
+            feed.PushSettings();
+        }
+
+        root.DropDownItems.Add("Next wallpaper", null, (_, _) => feed.NextWallpaper());
+        var folder = new Forms.ToolStripMenuItem("Folder...", null, (_, _) =>
+        {
+            using var dlg = new Forms.FolderBrowserDialog
+            {
+                Description = "Folder the wallpaper picks a random image from on every song change",
+                UseDescriptionForTitle = true,
+                SelectedPath = Directory.Exists(cfg.WallpaperFolder) ? cfg.WallpaperFolder : "",
+            };
+            if (dlg.ShowDialog() != Forms.DialogResult.OK) return;
+            cfg.WallpaperFolder = dlg.SelectedPath;
+            // Collections belong to the old folder.
+            cfg.WallpaperDesktop.Collection = cfg.WallpaperLock.Collection = "all";
+            Changed();
+        });
+        root.DropDownItems.Add(folder);
+        root.DropDownItems.Add(new Forms.ToolStripSeparator());
+        root.DropDownItems.Add(BuildWallpaperSurfaceMenu("Desktop", cfg.WallpaperDesktop, feed, Changed));
+        root.DropDownItems.Add(BuildWallpaperSurfaceMenu("Lock screen", cfg.WallpaperLock, feed, Changed));
+
+        root.DropDownOpening += (_, _) => folder.Text = cfg.WallpaperFolder.Length > 0
+            ? $"Folder... ({Path.GetFileName(Path.TrimEndingDirectorySeparator(cfg.WallpaperFolder))})"
+            : "Folder... (none)";
+        return root;
+    }
+
+    /// <summary>The look of one wallpaper surface: background, collection, layout, sizes, toggles.</summary>
+    private static Forms.ToolStripMenuItem BuildWallpaperSurfaceMenu(string label, WallpaperSettings s,
+        WallpaperFeed feed, Action changed)
+    {
+        var root = new Forms.ToolStripMenuItem(label);
+        var refresh = new List<Action>();
+
+        // A submenu of mutually exclusive values, rebuilt on open so its options
+        // (the folder's collections) and check mark are always current.
+        void Choice<T>(string text, Func<(T Value, string Label)[]> options, Func<T> get, Action<T> set)
+        {
+            var sub = new Forms.ToolStripMenuItem(text);
+            void Rebuild()
+            {
+                sub.DropDownItems.Clear();
+                foreach (var (value, optLabel) in options())
+                {
+                    var v = value;
+                    sub.DropDownItems.Add(new Forms.ToolStripMenuItem(optLabel, null, (_, _) => { set(v); changed(); })
+                    {
+                        Checked = EqualityComparer<T>.Default.Equals(get(), v),
+                    });
+                }
+            }
+            Rebuild();
+            sub.DropDownOpening += (_, _) => Rebuild();
+            root.DropDownItems.Add(sub);
+        }
+
+        void Toggle(string text, Func<bool> get, Action<bool> set)
+        {
+            var item = new Forms.ToolStripMenuItem(text, null, (_, _) => { set(!get()); changed(); });
+            refresh.Add(() => item.Checked = get());
+            root.DropDownItems.Add(item);
+        }
+
+        static string Title(string c) => c.Length == 0 ? c : char.ToUpperInvariant(c[0]) + c[1..];
+
+        Choice("Background",
+            () => new[] { ("wallpapers", "My wallpapers (new one each song)"), ("dynamic", "Album gradient") },
+            () => s.Background, v => s.Background = v);
+        Choice("Collection",
+            () => new[] { ("all", "All") }.Concat(feed.Categories().Select(c => (c, Title(c)))).ToArray(),
+            () => s.Collection, v => s.Collection = v);
+        Choice("Layout",
+            () => new[] { ("split", "Cover + lyrics"), ("lyrics", "Lyrics only"), ("lock", "Centred (lock screen)") },
+            () => s.Layout, v => s.Layout = v);
+        root.DropDownItems.Add(new Forms.ToolStripSeparator());
+
+        Choice("Lyrics size",
+            () => new[] { 80, 90, 100, 115, 130, 150 }.Select(p => (p, $"{p}%")).ToArray(),
+            () => s.LyricsSize, v => s.LyricsSize = v);
+        Choice("Darken background",
+            () => new[] { 0, 20, 35, 50, 65 }.Select(p => (p, p == 0 ? "Off" : $"{p}%")).ToArray(),
+            () => s.Dim, v => s.Dim = v);
+        Choice("Wallpaper blur",
+            () => new[] { 0, 6, 12, 24 }.Select(px => (px, px == 0 ? "Off" : $"{px} px")).ToArray(),
+            () => s.WallpaperBlur, v => s.WallpaperBlur = v);
+        root.DropDownItems.Add(new Forms.ToolStripSeparator());
+
+        Toggle("Slow zoom drift", () => s.KenBurns, v => s.KenBurns = v);
+        Toggle("Gradient reacts to bass", () => s.AudioReactive, v => s.AudioReactive = v);
+        Toggle("Blur distant lines", () => s.LineBlur, v => s.LineBlur = v);
+        Toggle("Spicy Lyrics font", () => s.SpicyFont, v => s.SpicyFont = v);
+        Toggle("Clock when nothing plays", () => s.Clock, v => s.Clock = v);
+
+        root.DropDownOpening += (_, _) => refresh.ForEach(r => r());
         return root;
     }
 

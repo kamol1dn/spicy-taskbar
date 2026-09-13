@@ -14,12 +14,16 @@ namespace TaskbarLyrics;
 /// It also stands in for the Wallpaper Engine APIs other hosts (Aura) don't have:
 ///   {type:"list-wallpapers", dir}  -> {type:"wallpapers", dir, files[]}  (folder picker)
 ///   {type:"audio", on}             -> {type:"audio", bass} ~30x/s        (audio listener)
+/// and carries the tray's wallpaper settings ({type:"settings"}) and "next wallpaper".
 /// </summary>
 public sealed class WallpaperFeed
 {
     private readonly BridgeServer _bridge;
+    private readonly Config _cfg;
     private readonly object _gate = new();
     private readonly Timer _timer;
+
+    private (string Dir, DateTime At, List<string> Names)? _categories;
 
     private object? _track;
     private object _lyrics = new { type = "lyrics", state = "none", lyrics = (Lyrics?)null };
@@ -37,9 +41,10 @@ public sealed class WallpaperFeed
     private static readonly HashSet<string> ImageExt = new(StringComparer.OrdinalIgnoreCase)
         { ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif" };
 
-    public WallpaperFeed(BridgeServer bridge)
+    public WallpaperFeed(BridgeServer bridge, Config cfg)
     {
         _bridge = bridge;
+        _cfg = cfg;
         _bridge.ViewerConnected += SendSnapshot;
         _bridge.ViewerMessage += OnViewerMessage;
         _bridge.ViewerDisconnected += v =>
@@ -106,7 +111,8 @@ public sealed class WallpaperFeed
         {
             type = "pos",
             has = now.HasValue,
-            ms = now ?? 0,
+            // Same sync nudge the taskbar overlay applies, so both show the same line.
+            ms = (now ?? 0) + _cfg.GlobalOffsetMs,
             playing = PositionEngine.Playing,
             rate = PositionEngine.Rate,
         };
@@ -118,11 +124,60 @@ public sealed class WallpaperFeed
         if (_bridge.HasViewers) _bridge.Broadcast(PositionMessage());
     }
 
+    // ---- tray settings ----
+
+    private object SettingsMessage() => new
+    {
+        type = "settings",
+        folder = _cfg.WallpaperFolder,
+        desktop = _cfg.WallpaperDesktop.ToMessage(),
+        lockscreen = _cfg.WallpaperLock.ToMessage(),
+    };
+
+    /// <summary>Send the current wallpaper settings to every open wallpaper (after a tray change).</summary>
+    public void PushSettings() => _bridge.Broadcast(SettingsMessage());
+
+    /// <summary>Tray "Next wallpaper": every wallpaper in image mode moves to its next image.</summary>
+    public void NextWallpaper() => _bridge.Broadcast(new { type = "next-wallpaper" });
+
+    /// <summary>
+    /// Collections offered in the tray for the configured folder: subfolders and filename
+    /// prefixes ("nord_a_forest.jpg" -> "nord") that hold at least 3 images, largest first.
+    /// </summary>
+    public List<string> Categories()
+    {
+        var dir = _cfg.WallpaperFolder;
+        if (_categories is { } c && c.Dir == dir && DateTime.UtcNow - c.At < TimeSpan.FromMinutes(1))
+            return c.Names;
+        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var f in ListImageFiles(dir))
+        {
+            var name = Path.GetFileNameWithoutExtension(f);
+            var cut = name.IndexOf('_');
+            if (cut > 0) Bump(counts, name[..cut]);
+            var parent = Path.GetDirectoryName(f);
+            if (parent != null && !string.Equals(Path.TrimEndingDirectorySeparator(parent),
+                    Path.TrimEndingDirectorySeparator(dir), StringComparison.OrdinalIgnoreCase))
+                Bump(counts, Path.GetFileName(parent));
+        }
+        var names = counts.Where(kv => kv.Value >= 3)
+            .OrderByDescending(kv => kv.Value)
+            .Take(12)
+            .Select(kv => kv.Key.ToLowerInvariant())
+            .Distinct()
+            .ToList();
+        _categories = (dir, DateTime.UtcNow, names);
+        return names;
+
+        static void Bump(Dictionary<string, int> d, string k) => d[k] = d.TryGetValue(k, out var n) ? n + 1 : 1;
+    }
+
     private void SendSnapshot(BridgeServer.Viewer v)
     {
         lock (_gate)
         {
             v.Send(new { type = "hello", app = "TaskbarLyrics" });
+            v.Send(SettingsMessage()); // first, so the page lays out right from the start
             if (_track != null) v.Send(_track);
             v.Send(_lyrics);
             if (_art != null) v.Send(_art);
@@ -147,25 +202,32 @@ public sealed class WallpaperFeed
         }
     }
 
-    /// <summary>Image files in the folder the wallpaper's config names (subfolders too).</summary>
+    /// <summary>Image files in the folder the wallpaper asks for (subfolders too).</summary>
     private static object ListWallpapers(string? dir)
     {
+        var files = ListImageFiles(dir);
+        Log.Write($"feed: listed {files.Length} wallpapers in {dir}");
+        return files.Length > 0
+            ? new { type = "wallpapers", dir, files, error = (string?)null }
+            : new { type = "wallpapers", dir, files, error = (string?)"no images found" };
+    }
+
+    private static string[] ListImageFiles(string? dir)
+    {
         dir = Environment.ExpandEnvironmentVariables(dir ?? "").Trim();
+        if (dir.Length == 0 || !Directory.Exists(dir)) return Array.Empty<string>();
         try
         {
-            if (dir.Length == 0 || !Directory.Exists(dir))
-                return new { type = "wallpapers", dir, files = Array.Empty<string>(), error = "folder not found" };
-            var files = Directory
+            return Directory
                 .EnumerateFiles(dir, "*", new EnumerationOptions { RecurseSubdirectories = true, MaxRecursionDepth = 3, IgnoreInaccessible = true })
                 .Where(f => ImageExt.Contains(Path.GetExtension(f)))
                 .Take(5000)
                 .ToArray();
-            Log.Write($"feed: listed {files.Length} wallpapers in {dir}");
-            return new { type = "wallpapers", dir, files };
         }
         catch (Exception ex)
         {
-            return new { type = "wallpapers", dir, files = Array.Empty<string>(), error = ex.Message };
+            Log.Write($"feed: listing {dir} failed: {ex.Message}");
+            return Array.Empty<string>();
         }
     }
 

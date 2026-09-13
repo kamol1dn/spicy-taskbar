@@ -83,6 +83,23 @@ public sealed class Config
     /// backdrop and doesn't wash out the taskbar icons / lyrics rendered in front of it.</summary>
     public double VizOpacity { get; set; } = 0.55;
 
+    // ---- wallpaper (wallpaper/ folder, in Wallpaper Engine or Aura) ----
+
+    /// <summary>Folder the wallpaper takes a random image from on every song change.</summary>
+    public string WallpaperFolder { get; set; } = DefaultWallpaperFolder();
+
+    /// <summary>Settings pushed to the desktop wallpaper (index.html) — set from the tray.</summary>
+    public WallpaperSettings WallpaperDesktop { get; set; } = new();
+
+    /// <summary>Settings pushed to the lock-screen wallpaper (lockscreen.html).</summary>
+    public WallpaperSettings WallpaperLock { get; set; } = WallpaperSettings.LockDefaults();
+
+    private static string DefaultWallpaperFolder()
+    {
+        var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "Wallpapers");
+        return Directory.Exists(dir) ? dir : "";
+    }
+
     public static string Dir =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TaskbarLyrics");
 
@@ -116,6 +133,48 @@ public sealed class Config
             Log.Write($"config: save failed: {ex.Message}");
         }
     }
+}
+
+/// <summary>
+/// One wallpaper surface's look. Names mirror the page's `settings` keys (wallpaper/js/app.js);
+/// sent to the page as-is and applied over its config.js defaults.
+/// </summary>
+public sealed class WallpaperSettings
+{
+    /// <summary>"wallpapers" (random image from the folder per song) or "dynamic" (album gradient).</summary>
+    public string Background { get; set; } = "wallpapers";
+
+    /// <summary>"all", or a subfolder / filename-prefix category of the folder.</summary>
+    public string Collection { get; set; } = "all";
+
+    /// <summary>"split" (cover + lyrics), "lyrics" (lyrics only) or "lock" (centred, under Windows' clock).</summary>
+    public string Layout { get; set; } = "split";
+
+    public int LyricsSize { get; set; } = 100;    // %
+    public int Dim { get; set; } = 35;            // % darkening over the background
+    public int WallpaperBlur { get; set; } = 0;   // px
+    public bool KenBurns { get; set; } = true;    // slow zoom drift on images
+    public bool AudioReactive { get; set; } = true;
+    public bool LineBlur { get; set; } = true;    // blur lines away from the current one
+    public bool SpicyFont { get; set; } = true;
+    public bool Clock { get; set; } = true;       // clock when nothing is playing
+
+    public static WallpaperSettings LockDefaults() => new() { Layout = "lock", Clock = false, Dim = 45 };
+
+    public object ToMessage() => new
+    {
+        background = Background,
+        collection = Collection,
+        layout = Layout,
+        lyricssize = LyricsSize,
+        dim = Dim,
+        wallpaperblur = WallpaperBlur,
+        kenburns = KenBurns,
+        audioreactive = AudioReactive,
+        lineblur = LineBlur,
+        spicyfont = SpicyFont,
+        clock = Clock,
+    };
 }
 
 public static class Log

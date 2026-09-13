@@ -24,7 +24,7 @@ public static class Program
         var viz = new VisualizerWindow(cfg);
         var appName = new AppNameWindow(cfg);
         // Feeds the Wallpaper Engine wallpaper (wallpaper/ folder) over ws://localhost:PORT/wallpaper.
-        var feed = new WallpaperFeed(bridge);
+        var feed = new WallpaperFeed(bridge, cfg);
 
         TrackInfo? lastInfo = null;
         watcher.TrackChanged += info =>
@@ -64,7 +64,7 @@ public static class Program
         viz.SetEnabled(cfg.VizEnabled);
         appName.SetEnabled(cfg.AppNameEnabled);
 
-        using var tray = new TrayIcon(cfg, overlay, viz, appName, app);
+        using var tray = new TrayIcon(cfg, overlay, viz, appName, feed, app);
         app.Run();
     }
 }
