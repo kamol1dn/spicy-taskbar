@@ -1,0 +1,179 @@
+{
+	"contentrating" : "Everyone",
+	"description" : "Spicy Lyrics-style synced lyrics on the desktop. Needs TaskbarLyrics running for lyrics; without it, it still shows the now-playing card and per-song backgrounds.",
+	"file" : "index.html",
+	"general" :
+	{
+		"supportsaudioprocessing" : true,
+		"properties" :
+		{
+			"background" :
+			{
+				"order" : 100,
+				"text" : "Background",
+				"type" : "combo",
+				"value" : "wallpapers",
+				"options" :
+				[
+					{ "label" : "My wallpapers (random per song)", "value" : "wallpapers" },
+					{ "label" : "Dynamic album gradient", "value" : "dynamic" }
+				]
+			},
+			"wallpaperfolder" :
+			{
+				"order" : 101,
+				"text" : "Wallpaper folder",
+				"type" : "directory",
+				"mode" : "fetchall",
+				"condition" : "background.value == 'wallpapers'"
+			},
+			"collection" :
+			{
+				"order" : 102,
+				"text" : "Collection",
+				"type" : "combo",
+				"value" : "all",
+				"condition" : "background.value == 'wallpapers'",
+				"options" :
+				[
+					{ "label" : "All", "value" : "all" },
+					{ "label" : "Calm", "value" : "calm" },
+					{ "label" : "Digital", "value" : "digital" },
+					{ "label" : "Gruvbox", "value" : "gruvbox" },
+					{ "label" : "Monochrome", "value" : "monochrome" },
+					{ "label" : "Nord", "value" : "nord" },
+					{ "label" : "Others", "value" : "others" }
+				]
+			},
+			"wallpaperblur" :
+			{
+				"order" : 103,
+				"text" : "Wallpaper blur",
+				"type" : "slider",
+				"value" : 0,
+				"min" : 0,
+				"max" : 40,
+				"step" : 1,
+				"fraction" : false,
+				"condition" : "background.value == 'wallpapers'"
+			},
+			"kenburns" :
+			{
+				"order" : 104,
+				"text" : "Slow zoom drift",
+				"type" : "bool",
+				"value" : true,
+				"condition" : "background.value == 'wallpapers'"
+			},
+			"dynspeed" :
+			{
+				"order" : 105,
+				"text" : "Gradient speed %",
+				"type" : "slider",
+				"value" : 100,
+				"min" : 20,
+				"max" : 300,
+				"step" : 5,
+				"fraction" : false,
+				"condition" : "background.value == 'dynamic'"
+			},
+			"audioreactive" :
+			{
+				"order" : 106,
+				"text" : "Gradient reacts to bass",
+				"type" : "bool",
+				"value" : true,
+				"condition" : "background.value == 'dynamic'"
+			},
+			"dim" :
+			{
+				"order" : 107,
+				"text" : "Darken background %",
+				"type" : "slider",
+				"value" : 35,
+				"min" : 0,
+				"max" : 80,
+				"step" : 1,
+				"fraction" : false
+			},
+			"layout" :
+			{
+				"order" : 200,
+				"text" : "Layout",
+				"type" : "combo",
+				"value" : "split",
+				"options" :
+				[
+					{ "label" : "Cover + lyrics", "value" : "split" },
+					{ "label" : "Lyrics only", "value" : "lyrics" }
+				]
+			},
+			"lyricssize" :
+			{
+				"order" : 201,
+				"text" : "Lyrics size %",
+				"type" : "slider",
+				"value" : 100,
+				"min" : 60,
+				"max" : 160,
+				"step" : 5,
+				"fraction" : false
+			},
+			"linepos" :
+			{
+				"order" : 202,
+				"text" : "Active line height %",
+				"type" : "slider",
+				"value" : 45,
+				"min" : 20,
+				"max" : 70,
+				"step" : 1,
+				"fraction" : false
+			},
+			"lineblur" :
+			{
+				"order" : 203,
+				"text" : "Blur distant lines",
+				"type" : "bool",
+				"value" : true
+			},
+			"spicyfont" :
+			{
+				"order" : 204,
+				"text" : "Spicy Lyrics font",
+				"type" : "bool",
+				"value" : true
+			},
+			"offset" :
+			{
+				"order" : 205,
+				"text" : "Lyrics offset (ms)",
+				"type" : "slider",
+				"value" : 0,
+				"min" : -1000,
+				"max" : 1000,
+				"step" : 10,
+				"fraction" : false
+			},
+			"clock" :
+			{
+				"order" : 300,
+				"text" : "Clock when nothing plays",
+				"type" : "bool",
+				"value" : true
+			},
+			"port" :
+			{
+				"order" : 400,
+				"text" : "TaskbarLyrics port",
+				"type" : "textinput",
+				"value" : "9012"
+			}
+		}
+	},
+	"preview" : "preview.jpg",
+	"tags" : [ "Music" ],
+	"title" : "Spicy Wallpaper",
+	"type" : "web",
+	"visibility" : "private"
+}
