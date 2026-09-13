@@ -59,6 +59,12 @@ public sealed class LyricsService
 
     private async Task<Lyrics?> ResolveAsync(TrackInfo info, CancellationToken ct)
     {
+        if (!info.IsSpotify && !Matching.IsIdentifiable(info.Title, info.Artist))
+        {
+            Log.Write($"resolve: skipping \"{info.Title}\" (no artist to match on)");
+            return null;
+        }
+
         // Metadata-only key: stable across the trackId/duration trickling in.
         var cacheKey = $"{Matching.Norm(info.Title)}|{Matching.Norm(info.Artist)}";
 

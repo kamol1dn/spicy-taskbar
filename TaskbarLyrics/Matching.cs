@@ -35,6 +35,16 @@ public static partial class Matching
         return a.Trim();
     }
 
+    /// <summary>
+    /// False for media with nothing to identify a song by: no artist and no
+    /// "Artist - Title" in the title. Browser tabs look like this (an Instagram
+    /// reel reports just "Instagram"), and a title-only search then matched an
+    /// unrelated song that happens to share the page's name.
+    /// </summary>
+    public static bool IsIdentifiable(string rawTitle, string rawArtist) =>
+        CleanArtist(rawArtist).Length > 0 ||
+        Regex.IsMatch(CleanTitle(rawTitle), @"^(.{1,60}?)\s*[-–—]\s+(.+)$");
+
     /// <summary>Best-first list of (artist, title) interpretations of the metadata.</summary>
     public static List<(string Artist, string Title)> Candidates(string rawTitle, string rawArtist)
     {
