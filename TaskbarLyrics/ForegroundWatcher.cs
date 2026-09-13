@@ -15,6 +15,10 @@ public sealed class ForegroundWatcher : IDisposable
     /// <summary>Raised (on a pool thread) only when the resolved name differs from the last one.</summary>
     public event Action<string>? AppChanged;
 
+    /// <summary>Raised (on a pool thread) when focus moves onto or off the desktop itself —
+    /// the wallpaper surface, not the taskbar (both of which read as "Desktop" above).</summary>
+    public event Action<bool>? DesktopChanged;
+
     private const uint EVENT_SYSTEM_FOREGROUND = 0x0003;
     private const uint WINEVENT_OUTOFCONTEXT = 0x0000;
     private const uint WINEVENT_SKIPOWNPROCESS = 0x0002;
@@ -42,6 +46,7 @@ public sealed class ForegroundWatcher : IDisposable
     private readonly WinEventProc _proc;
     private IntPtr _hook;
     private volatile string? _last;
+    private int _desktop = -1; // -1 unknown, 0 no, 1 yes
     private int _token;
 
     public ForegroundWatcher() => _proc = OnWinEvent;
@@ -62,6 +67,7 @@ public sealed class ForegroundWatcher : IDisposable
     {
         if (_hook != IntPtr.Zero) { UnhookWinEvent(_hook); _hook = IntPtr.Zero; }
         _last = null;
+        _desktop = -1;
     }
 
     private void OnWinEvent(IntPtr hook, uint ev, IntPtr hwnd, int idObject, int idChild,
@@ -78,9 +84,15 @@ public sealed class ForegroundWatcher : IDisposable
         var token = Interlocked.Increment(ref _token);
         _ = Task.Run(() =>
         {
-            var name = DescribeWindow(hwnd);
+            var (name, desktop) = DescribeWindow(hwnd);
             if (name == null) return;
             if (Volatile.Read(ref _token) != token) return;   // a newer switch already won
+            var d = desktop ? 1 : 0;
+            if (Interlocked.Exchange(ref _desktop, d) != d)
+            {
+                try { DesktopChanged?.Invoke(desktop); }
+                catch (Exception ex) { Log.Write($"appname: desktop handler threw: {ex.Message}"); }
+            }
             if (name == _last) return;
             _last = name;
             try { AppChanged?.Invoke(name); }
@@ -88,10 +100,10 @@ public sealed class ForegroundWatcher : IDisposable
         });
     }
 
-    private static string? DescribeWindow(IntPtr hwnd)
+    private static (string? Name, bool Desktop) DescribeWindow(IntPtr hwnd)
     {
         GetWindowThreadProcessId(hwnd, out var pid);
-        if (pid == 0) return null;
+        if (pid == 0) return (null, false);
         var cls = ClassOf(hwnd);
         try
         {
@@ -101,7 +113,7 @@ public sealed class ForegroundWatcher : IDisposable
             // rough equivalent of macOS falling back to Finder.
             if (proc.ProcessName.Equals("explorer", StringComparison.OrdinalIgnoreCase) &&
                 cls is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd")
-                return "Desktop";
+                return ("Desktop", cls is "Progman" or "WorkerW");
 
             // Store/UWP apps are hosted by ApplicationFrameHost; the app itself
             // owns a child window belonging to a different process.
@@ -111,15 +123,15 @@ public sealed class ForegroundWatcher : IDisposable
                 if (hosted != 0)
                 {
                     using var real = Process.GetProcessById((int)hosted);
-                    return FriendlyName(real);
+                    return (FriendlyName(real), false);
                 }
             }
 
-            return FriendlyName(proc);
+            return (FriendlyName(proc), false);
         }
         catch
         {
-            return null;   // process died mid-switch, or is protected/elevated
+            return (null, false);   // process died mid-switch, or is protected/elevated
         }
     }
 
