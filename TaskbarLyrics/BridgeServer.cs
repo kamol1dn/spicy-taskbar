@@ -366,7 +366,8 @@ public sealed class BridgeServer
     public async Task<(int Status, JsonElement? Lyrics)> LyricsAsync(string trackId)
     {
         var reqId = $"l{Interlocked.Increment(ref _reqCounter)}";
-        var resp = await RequestAsync(new { type = "lyrics", reqId, trackId }, reqId, 20_000);
+        // The extension may spend two 15s API attempts (401 -> refresh token -> retry).
+        var resp = await RequestAsync(new { type = "lyrics", reqId, trackId }, reqId, 35_000);
         if (resp is not { } r) return (0, null);
         if (!(r.TryGetProperty("ok", out var ok) && ok.ValueKind == JsonValueKind.True))
         {
