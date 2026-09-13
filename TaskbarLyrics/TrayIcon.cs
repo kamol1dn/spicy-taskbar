@@ -30,7 +30,22 @@ public sealed class TrayIcon : IDisposable
             appName.Dispatcher.BeginInvoke(appName.RefreshAppearance);
         });
         menu.Items.Add(shadow);
-        menu.Opening += (_, _) => shadow.Checked = cfg.TextShadow;
+
+        // Read at render time by the taskbar strip and the wallpaper feed, so a change lands at once.
+        var timing = new Forms.ToolStripMenuItem("Lyrics timing...", null, (_, _) =>
+        {
+            if (NumberPrompt.Show("Lyrics timing",
+                    "Shift in ms. Positive = lyrics earlier (if they lag the song), negative = later. Taskbar and wallpaper.",
+                    cfg.GlobalOffsetMs, -5000, 5000) is not { } ms) return;
+            cfg.GlobalOffsetMs = ms;
+            cfg.Save();
+        });
+        menu.Items.Add(timing);
+        menu.Opening += (_, _) =>
+        {
+            shadow.Checked = cfg.TextShadow;
+            timing.Text = $"Lyrics timing... ({cfg.GlobalOffsetMs:+0;-0;0} ms)";
+        };
 
         menu.Items.Add("Open log", null, (_, _) =>
         {

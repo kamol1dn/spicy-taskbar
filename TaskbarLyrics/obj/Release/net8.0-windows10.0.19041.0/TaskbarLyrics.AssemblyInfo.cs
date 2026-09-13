@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("TaskbarLyrics")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+dd333a8c2494f345186b897c6f57e958b037280e")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+fccd20406fdc0d706589e7d8267afb9f80fb6e2d")]
 [assembly: System.Reflection.AssemblyProductAttribute("TaskbarLyrics")]
 [assembly: System.Reflection.AssemblyTitleAttribute("TaskbarLyrics")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

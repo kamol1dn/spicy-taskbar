@@ -127,6 +127,7 @@ starts, and wallpapers reconnect on their own whenever the app (re)starts.
 │   ├─ Desktop      background · collection · layout · lyrics size · darken ·
 │   └─ Lock screen  wallpaper blur · slow zoom · bass pulse · line blur · font · clock
 ├─ Text shadow
+├─ Lyrics timing… sync nudge in ms, positive = earlier (taskbar and wallpaper)
 ├─ Open log · Clear lyrics cache
 └─ Exit
 ```
