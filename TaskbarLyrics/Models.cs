@@ -13,6 +13,7 @@ public sealed class BgVocal
     public double End;
     public string Text = "";
     public List<Seg>? Sylls; // null => no syllable timing, sweep linearly
+    public bool Opposite;    // belongs to an OppositeAligned (duet) line
 }
 
 public sealed class LyricLine
@@ -21,6 +22,7 @@ public sealed class LyricLine
     public double End;
     public string Text = "";
     public List<Seg>? Sylls; // null => line-synced only
+    public bool Opposite;    // SpicyLyrics "OppositeAligned": a second singer, drawn right-aligned
 }
 
 public sealed class Lyrics
@@ -49,6 +51,7 @@ public static class LyricsNormalizer
 
         foreach (var item in content.EnumerateArray())
         {
+            var opposite = item.TryGetProperty("OppositeAligned", out var oa) && oa.ValueKind == JsonValueKind.True;
             if (type == "Line")
             {
                 var line = new LyricLine
@@ -56,6 +59,7 @@ public static class LyricsNormalizer
                     Text = item.GetPropOr("Text", ""),
                     Start = item.GetPropOr("StartTime", 0.0) * 1000,
                     End = item.GetPropOr("EndTime", 0.0) * 1000,
+                    Opposite = opposite,
                 };
                 if (!string.IsNullOrWhiteSpace(line.Text)) ly.Lines.Add(line);
                 continue;
@@ -73,6 +77,7 @@ public static class LyricsNormalizer
                         Start = lead.GetPropOr("StartTime", 0.0) * 1000,
                         End = lead.GetPropOr("EndTime", 0.0) * 1000,
                         Sylls = segs,
+                        Opposite = opposite,
                     });
                 }
             }
@@ -88,6 +93,7 @@ public static class LyricsNormalizer
                         Start = bg.GetPropOr("StartTime", 0.0) * 1000,
                         End = bg.GetPropOr("EndTime", 0.0) * 1000,
                         Sylls = segs,
+                        Opposite = opposite,
                     });
                 }
             }
