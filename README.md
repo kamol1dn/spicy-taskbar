@@ -5,48 +5,191 @@
 
 ![Taskbar Lyrics in context](readme-assets/screenshot.jpg)
 
-Synced (word-by-word, karaoke-style) lyrics rendered directly on the Windows taskbar,
-for whatever is playing — Spotify, YouTube in a browser, anything that shows up in the
-Windows media flyout.
+Synced (word-by-word, karaoke-style) lyrics for whatever is playing on Windows — Spotify,
+YouTube in a browser, anything that shows up in the Windows media flyout — drawn right on
+the taskbar, and optionally as a full-screen [Spicy Lyrics](https://github.com/Spikerko/spicy-lyrics)-style
+**lyrics wallpaper** for the desktop and the lock screen.
+
+| Desktop wallpaper — album gradient | Desktop wallpaper — your own images |
+|---|---|
+| ![Lyrics wallpaper with the animated album gradient](readme-assets/wallpaper-desktop.jpg) | ![Lyrics wallpaper over a random image from your folder](readme-assets/wallpaper-images.jpg) |
+
+| Lock screen |
+|---|
+| ![Lock-screen layout: lyrics centred below where Windows draws its clock](readme-assets/wallpaper-lockscreen.jpg) |
+
+<sub>Screenshots use the wallpaper's built-in demo (`index.html?demo`): placeholder lyrics, generated cover and background. The empty top third of the lock screen is where Windows draws its own clock.</sub>
+
+## Features
+
+- **Taskbar strip** — the current line with a per-syllable sweep, background vocals
+  ("yeah", "come on") as a smaller row, ● ● ● during instrumental gaps. Click-through,
+  positioned anywhere along the top/bottom edge, on or above the taskbar.
+- **Lyrics wallpaper** (Wallpaper Engine or Aura) — the Spicy Lyrics look full-screen:
+  word gradient sweep with glow, letter-by-letter emphasis on held notes, blur on lines
+  away from the current one, duet lines right-aligned, background vocals, interlude dots,
+  next to a now-playing card with cover, title and progress.
+- **Backgrounds** — a random image from your wallpaper folder on **every song change**
+  (no repeats until the whole folder has shown, filterable by collection), or the
+  animated, bass-reactive album-cover gradient.
+- **Lock screen** (Aura) — its own layout: lyrics centred under Windows' clock and a
+  compact now-playing strip. Keeps going while the PC is locked.
+- **Any player** — word-level lyrics for Spotify through the spicetify extension;
+  line-level (LRCLIB) for everything else. YouTube titles like
+  `Artist - Title (Official Video)` get cleaned up and matched.
+- **Extras on the taskbar** — an album-coloured audio visualizer and a macOS-style
+  active-app name. Everything is set from the tray icon.
 
 ## Download
 
 Grab the latest build from [Releases](https://github.com/kamol1dn/spicy-taskbar/releases):
 
-- **`TaskbarLyrics.exe`** — self-contained, just run it. No .NET install needed.
-- **`TaskbarLyrics-framework-dependent.zip`** — tiny, needs the
-  [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0).
+| file | what it is |
+|---|---|
+| **`TaskbarLyrics.exe`** | the app, self-contained — just run it. No .NET install needed. |
+| **`TaskbarLyrics-framework-dependent.zip`** | same app, tiny; needs the [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0) |
+| **`SpicyWallpaper.zip`** | the lyrics wallpaper (for Wallpaper Engine or Aura) |
+| **`spicy-bridge.js`** | the spicetify extension that unlocks word-level Spotify lyrics |
 
-It runs from the tray (♪). Lyrics for Spotify are word-level once the spicetify
-extension is installed (below); everything else falls back to line-level sync.
+## Setup
+
+**1. The app.** Run `TaskbarLyrics.exe`; it lives in the tray (♪). To start it with
+Windows, put a shortcut to it in `shell:startup` (Win+R → `shell:startup`).
+
+**2. Word-level Spotify lyrics (optional).** Needs [spicetify](https://spicetify.app):
+
+```powershell
+Copy-Item spicy-bridge.js "$env:APPDATA\spicetify\Extensions\"
+spicetify config extensions spicy-bridge.js
+spicetify apply
+```
+
+Re-run the copy + `spicetify apply` whenever the extension updates; it only takes effect
+after Spotify restarts. The log (`%LOCALAPPDATA%\TaskbarLyrics\log.txt`) then shows
+`resolve: spicy lyrics ok (Syllable)`.
+
+**3. The wallpaper (optional).** Unzip `SpicyWallpaper.zip` somewhere permanent, then:
+
+- **Aura Wallpaper** — *Desktop Wallpaper* → **File** → `index.html`, and
+  *Lockscreen Wallpaper* → **File** → `lockscreen.html`.
+- **Wallpaper Engine** — link the folder into its projects, then pick **Spicy Wallpaper**
+  under *My Wallpapers* (edits to the folder show up live):
+  ```powershell
+  New-Item -ItemType Junction -Path "<wallpaper_engine>\projects\myprojects\spicy-wallpaper" -Target "<path>\wallpaper"
+  ```
+
+Use one wallpaper app on the desktop at a time. With the wallpaper up you may want
+tray → **Lyrics → Hide while the desktop is showing**, so the taskbar strip steps aside
+whenever the desktop itself is in front.
 
 ## How it works
 
-```
-┌───────────────┐  ws://localhost:9012   ┌──────────────────────────────┐
-│ Spotify       │ ◄────────────────────► │ TaskbarLyrics.exe (WPF)      │
-│ + spicetify   │   search / lyrics /    │  • SMTC watcher (any player) │
-│ spicy-bridge  │   exact position push  │  • position interpolation    │
-└───────────────┘                        │  • karaoke overlay renderer  │
-        │                                └──────────────────────────────┘
-        ▼                                          │ fallback
-  api.spicylyrics.org                              ▼
-  (word-level lyrics,                         lrclib.net
-   uses Spotify's own token)                  (line-level, no auth)
+```mermaid
+flowchart LR
+    API["api.spicylyrics.org<br/>word-level lyrics"] --> EXT["Spotify<br/>+ spicy-bridge.js"]
+    EXT <-->|"ws://localhost:9012<br/>track id, position, search, lyrics"| APP
+    SMTC["Windows media session<br/>any player"] --> APP
+    LRC["lrclib.net<br/>line-level fallback"] --> APP
+    DIR["your wallpaper folder"] --> APP
+    APP["TaskbarLyrics.exe<br/>tray app"] --> STRIP["taskbar strip"]
+    APP -->|"ws://localhost:9012/wallpaper<br/>track, lyrics, cover, position, settings"| WALL["lyrics wallpaper<br/>Wallpaper Engine · Aura desktop · Aura lock screen"]
 ```
 
-- **`extension/spicy-bridge.js`** — spicetify extension running inside Spotify. Servs
-  Spotify track search + SpicyLyrics API fetches (using the client's own session token,
-  same as the real Spicy Lyrics extension) and pushes exact playback position every 500ms.
-- **`TaskbarLyrics/`** — .NET 8 WPF app. Listens to the Windows media session (SMTC),
-  resolves lyrics (cache → SpicyLyrics via bridge → LRCLIB), renders a click-through
-  always-on-top strip over the taskbar: main line with per-syllable sweep, smaller
-  filler/background vocals row ("yeah", "come on"), 3-dot interlude animation. Also hosts
-  the audio visualizer and the active-app name strip — see [Modules](#modules).
-- YouTube/browser tracks: video title + channel get cleaned (`(Official Video)`, `ft.`,
-  `Artist - Title` splitting) and matched against Spotify search by title/artist/duration.
+- **`extension/spicy-bridge.js`** — runs inside Spotify. Fetches SpicyLyrics with the
+  client's own session token (the same way the real Spicy Lyrics extension does), searches
+  Spotify for tracks playing elsewhere, and pushes Spotify's exact playback state 4× a
+  second from a worker timer, so a backgrounded Spotify window can't starve it.
+- **`TaskbarLyrics/`** — .NET 8 WPF app, the hub. Watches the Windows media session
+  (preferring whatever is actually playing), resolves lyrics (cache → SpicyLyrics via the
+  bridge → LRCLIB), interpolates the position between updates, draws the taskbar strip,
+  and feeds any number of wallpapers over the `/wallpaper` socket. Wallpapers get a full
+  snapshot when they connect (so a wallpaper that loads mid-song picks up at once), then
+  live updates. For hosts without Wallpaper Engine's APIs (Aura) the app also lists the
+  image folder and streams the bass level from its own audio capture.
+- **`wallpaper/`** — plain HTML/CSS/JS, no build step. The lyric animation is a port of
+  spicy-lyrics' renderer (same springs and curves); the album gradient is a WebGL warp +
+  blur of the cover.
 
-## Build & run
+Nothing has to be started by hand beyond the app: Spotify connects to it when Spotify
+starts, and wallpapers reconnect on their own whenever the app (re)starts.
+
+## Tray menu
+
+```
+♪
+├─ Lyrics         Enabled · Hide while the desktop is showing · top/bottom ·
+│                 left/middle/right · edge offset · on the taskbar
+├─ Active app     Enabled · same position options · font size
+├─ Visualizer     Enabled · randomize on song change · edge · preset
+├─ Wallpaper      Next wallpaper · Folder…
+│   ├─ Desktop      background · collection · layout · lyrics size · darken ·
+│   └─ Lock screen  wallpaper blur · slow zoom · bass pulse · line blur · font · clock
+├─ Text shadow
+├─ Open log · Clear lyrics cache
+└─ Exit
+```
+
+Everything picked in the tray is saved to `config.json` and applied immediately — the
+wallpaper included, which also remembers its last settings for when the app isn't
+running (e.g. the lock screen before login).
+
+## The wallpaper in detail
+
+**Backgrounds**
+- *My wallpapers*: a new random image from **Folder…** on every song change, cross-faded,
+  with an optional slow zoom and blur. **Collection** narrows it to a subfolder or a
+  filename prefix (`nord_a_forest.jpg` → *Nord*). If the folder is empty or its images
+  won't load, it falls back to the gradient.
+- *Album gradient*: the cover warped, rotated and heavily blurred in WebGL, flowing
+  faster on bass hits (spicy-lyrics' "dynamic background").
+
+**Layouts** — *Cover + lyrics* (default desktop), *Lyrics only*, and *Centred* (default
+lock screen: lyrics below Windows' clock, now-playing strip bottom-left, no second clock).
+A song without synced lyrics shows just the card, centred.
+
+**Entry points and settings**
+
+| file | used for |
+|---|---|
+| `index.html` | desktop (Wallpaper Engine, Aura desktop) |
+| `lockscreen.html` | Aura lock screen |
+| `config.js` | starting defaults, overridden by the tray |
+| `project.json` | Wallpaper Engine metadata + its property panel |
+
+Any setting also works as a URL parameter, e.g.
+`file:///C:/…/wallpaper/index.html?background=dynamic&lyricssize=120`.
+Open `index.html?demo` in a browser to see it without Spotify.
+
+**Without the app** the wallpaper still shows the background and a clock; in Wallpaper
+Engine its media integration also keeps the cover card and per-song images going — only
+the lyrics need TaskbarLyrics.
+
+## Config
+
+`config.json` next to the exe (created on first run). Most of it is easier from the tray.
+
+| key | meaning |
+|---|---|
+| `LyricsEnabled` | show the taskbar lyrics strip at all |
+| `LyricsHideOnDesktop` | fade the strip out while the desktop itself has focus |
+| `Placement` | `taskbar` (on the bar) or `above` (floating strip beside it) |
+| `VPos` | screen edge for the lyrics: `bottom` or `top` |
+| `Align` | `left` / `center` / `right` — moves the strip *and* the text inside it, so left-aligned lyrics start flush at the edge |
+| `XOffset` | inset in px from the aligned edge (no effect while centered) |
+| `Width` | max width of the strip |
+| `MainFontPx` / `BgFontPx` | font sizes for main + filler rows |
+| `TextShadow` | drop shadow behind all overlay text — turn off on dark wallpapers |
+| `GlobalOffsetMs` | sync nudge, positive = lyrics earlier (taskbar and wallpaper) |
+| `InterludeGapMs` | min instrumental gap before the ● ● ● dots |
+| `AppNameEnabled` | show the focused app's name, macOS-menubar style (off by default) |
+| `AppNameVPos` / `AppNameAlign` / `AppNameXOffset` | same position options as the lyrics, independently |
+| `AppNameFontPx` / `AppNameAlpha` / `AppNameWidth` | appearance of the app-name strip |
+| `VizEnabled` / `VizPreset` / `VizEdge` | visualizer on/off, style, screen edge (presets mirror at the top) |
+| `WallpaperFolder` | the folder the wallpaper picks images from |
+| `WallpaperDesktop` / `WallpaperLock` | per-surface wallpaper look (background, collection, layout, sizes, toggles) |
+| `Port` | bridge port (default 9012) |
+
+## Build from source
 
 ```powershell
 cd TaskbarLyrics
@@ -54,113 +197,7 @@ dotnet build -c Release
 start bin\Release\net8.0-windows10.0.19041.0\TaskbarLyrics.exe
 ```
 
-Extension install (re-run the copy + `spicetify apply` whenever `spicy-bridge.js`
-changes — it only takes effect after Spotify restarts):
-
-```powershell
-Copy-Item extension\spicy-bridge.js "$env:APPDATA\spicetify\Extensions\"
-spicetify config extensions spicy-bridge.js
-spicetify apply
-```
-
-## Modules
-
-Three independent overlays, each toggled and positioned on its own from the tray:
-
-| module | what it draws |
-|---|---|
-| **Lyrics** | the karaoke line, filler/background vocals row, ● ● ● interludes |
-| **Active app** | name of the app that currently has focus, macOS-menubar style |
-| **Visualizer** | album-colored spectrum bleeding out of the taskbar |
-
-Lyrics and Active app can each sit on the top or bottom edge, left/middle/right, on the
-taskbar itself or floating just inside the work area, with a pixel offset from the edge.
-The visualizer picks an edge too — at the top it mirrors, so bars hang downward.
-
-## Wallpaper (Wallpaper Engine / Aura)
-
-`wallpaper/` is a web wallpaper that renders the lyrics full-screen in
-the Spicy Lyrics style (word/letter karaoke fill, glow, distance blur, interlude dots,
-duet alignment), next to a now-playing card. It connects to the running app as a viewer
-on `ws://localhost:9012/wallpaper` — the app pushes track, lyrics, artwork and position.
-
-Install: link the folder into Wallpaper Engine's projects, then pick **Spicy Wallpaper**
-under *My Wallpapers*:
-
-```powershell
-New-Item -ItemType Junction -Path "<wallpaper_engine>\projects\myprojects\spicy-wallpaper" -Target "$PWD\wallpaper"
-```
-
-Properties (Wallpaper Engine sidebar):
-
-- **Background**: *My wallpapers* shows a random image from the chosen **Wallpaper folder**
-  on every song change (shuffle-bag, no repeats; **Collection** filters by folder or
-  `prefix_` of the filename). *Dynamic album gradient* is spicy-lyrics' animated,
-  bass-reactive blurred cover. With no folder picked it falls back to the gradient.
-- Blur / zoom drift / darken, layout (cover + lyrics, or lyrics only), lyrics size, active
-  line height, distant-line blur, lyrics offset, idle clock, and the app's port.
-
-Without the app running it still works through Wallpaper Engine's own media integration
-(card, cover gradient, per-song wallpapers) — just no lyrics. `index.html?demo` in a
-browser plays a built-in demo song.
-
-### Aura Wallpaper (desktop + lock screen)
-
-Aura shows local HTML on both surfaces, so there are two entry points:
-
-| surface | file | layout |
-|---|---|---|
-| Desktop | `wallpaper/index.html` | cover card + lyrics |
-| Lock screen | `wallpaper/lockscreen.html` | lyrics centred under Windows' clock, now-playing strip bottom-left |
-
-In Aura: *Desktop Wallpaper* / *Lockscreen Wallpaper* → **File** → pick the file.
-What Wallpaper Engine would provide comes from TaskbarLyrics over the bridge instead:
-the app lists the image folder, and streams the bass level from its loopback analyser
-while a wallpaper asks for it. Run only one of Wallpaper Engine / Aura on the desktop.
-
-### Wallpaper settings
-
-Right-click the tray icon → **Wallpaper**: next image, image folder, and a **Desktop**
-and a **Lock screen** submenu (background, collection, layout, lyrics size, darkening,
-blur, toggles). Changes are saved to `config.json` and applied to open wallpapers
-immediately; each page also remembers the last settings for when the app isn't running.
-`wallpaper/config.js` (or URL parameters like `index.html?background=dynamic`) only
-provides the starting defaults.
-
-## Config
-
-`config.json` next to the exe (created on first run):
-
-| key | meaning |
-|---|---|
-| `Placement` | `taskbar` (on the bar) or `above` (floating strip beside it) |
-| `VPos` | screen edge for the lyrics: `bottom` or `top` |
-| `Align` | `left` / `center` / `right` — moves the strip *and* the text inside it, so left-aligned lyrics start flush at the edge |
-| `XOffset` | inset in px from the aligned edge (no effect while centered) |
-| `Width` | max width of the strip |
-| `VizEdge` | screen edge for the visualizer: `bottom` or `top` (presets mirror) |
-| `AppNameEnabled` | show the focused app's name, macOS-menubar style (off by default) |
-| `AppNameVPos` / `AppNameAlign` / `AppNameXOffset` | same position options as the lyrics, independently |
-| `AppNameFontPx` / `AppNameAlpha` / `AppNameWidth` | appearance of the app-name strip |
-| `MainFontPx` / `BgFontPx` | font sizes for main + filler rows |
-| `TextShadow` | drop shadow behind all overlay text — turn off on dark wallpapers |
-| `GlobalOffsetMs` | sync nudge, positive = lyrics earlier (taskbar and wallpaper) |
-| `WallpaperFolder` / `WallpaperDesktop` / `WallpaperLock` | wallpaper settings — set from the tray |
-| `InterludeGapMs` | min instrumental gap before the ● ● ● dots |
-
-Tray icon (♪), one submenu per module:
-
-- **Lyrics position** — top/bottom, left/middle/right, edge offset, on-taskbar
-- **Active app** — on/off, same position options, font size
-- **Visualizer** — on/off, top/bottom edge, randomize, preset
-- **Wallpaper** — next image, folder, desktop / lock-screen look (see above)
-
-…plus **Text shadow** (applies to every module), open log, clear lyrics cache, exit. Everything picked from the tray is saved to `config.json`.
-
-## Autostart
-
-Create a shortcut to `TaskbarLyrics.exe` in `shell:startup`
-(Win+R → `shell:startup` → paste shortcut).
+The wallpaper needs no build — point Wallpaper Engine / Aura at `wallpaper/` directly.
 
 ## Notes
 
@@ -170,10 +207,14 @@ Create a shortcut to `TaskbarLyrics.exe` in `shell:startup`
 - The SpicyLyrics API is unofficial; its response notice permits personal individual
   use via official clients/forks — this is a personal single-user companion. If it
   ever blocks/changes, the LRCLIB path keeps working.
+- The wallpaper's look follows [Spikerko/spicy-lyrics](https://github.com/Spikerko/spicy-lyrics);
+  the renderer is a reimplementation, not copied code. Its font is served only to
+  Spotify, so the wallpaper falls back to Segoe UI.
 - Browser position (SMTC) can drift ~0.5s; Spotify position is exact via the bridge.
+- Media with nothing to identify a song by (a browser tab reporting just "Instagram")
+  gets no lyrics rather than a random song's.
 - **Mix mode / transitions**: Spotify blends tracks and seeks the incoming one to a
   non-zero start offset. Windows' media session still names the outgoing track through
   that blend, and its position is only republished on play/pause/seek — so whenever
   Spotify owns the session and the bridge is live, its clock and track id win outright.
-  The log notes any `bridge/SMTC disagree` moment. Needs the current `spicy-bridge.js`
-  applied; without it sync still corrects, just up to ~250ms later.
+  The log notes any `bridge/SMTC disagree` moment.
