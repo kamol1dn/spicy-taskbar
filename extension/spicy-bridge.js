@@ -113,6 +113,15 @@
 
   // Each probe resolves to something normalizeToken understands, or null/throws.
   const TOKEN_PROBES = [
+    // What spicy-lyrics itself reads first on current clients: a synchronous
+    // getter over the platform's own (always fresh) authorization store.
+    ["AuthorizationAPI.getState", async () => {
+      const api = Spicetify.Platform && Spicetify.Platform.AuthorizationAPI;
+      if (!api || typeof api.getState !== "function") return null;
+      const state = api.getState();
+      if (!state || state.isAuthorized === false || !state.token) return null;
+      return state.token; // { accessToken, accessTokenExpirationTimestampMs }
+    }],
     ["AuthorizationAPI.getToken", async () => {
       const api = Spicetify.Platform && Spicetify.Platform.AuthorizationAPI;
       return api && typeof api.getToken === "function" ? await api.getToken() : null;
@@ -146,6 +155,15 @@
     } catch (e) { /* diagnostics must never throw */ }
   }
 
+  // A token the API refused with 401. The platform keeps handing back the same
+  // string until it rotates, so remember it rather than just dropping the cache.
+  let rejectedToken = null;
+
+  function invalidateToken(token) {
+    rejectedToken = token;
+    if (tokenCache && tokenCache.accessToken === token) tokenCache = null;
+  }
+
   async function getToken() {
     if (tokenCache && tokenCache.expiresAtTime - Date.now() > 60_000) return tokenCache.accessToken;
 
@@ -155,9 +173,15 @@
       : TOKEN_PROBES;
 
     const failures = [];
+    let lastResort = null;
     for (const [name, probe] of probes) {
       try {
         const tok = normalizeToken(await probe());
+        if (tok && tok.accessToken === rejectedToken) {
+          lastResort = lastResort || tok;
+          failures.push(name + "=rejected");
+          continue;
+        }
         if (tok) {
           if (tokenSource !== name) LOG("token: using " + name);
           tokenSource = name;
@@ -169,6 +193,13 @@
         failures.push(name + "=" + ((e && e.message) || e));
       }
     }
+    // Every source still offers the refused token. A doubtful token beats none —
+    // the next 401 asks again — so hand it back rather than failing outright.
+    if (lastResort) {
+      rejectedToken = null;
+      tokenCache = lastResort;
+      return lastResort.accessToken;
+    }
     logTokenDiag();
     throw new Error("no spotify token available (" + failures.join("; ") + ")");
   }
@@ -178,38 +209,61 @@
   // Known-good version used only to bootstrap the ext_version query; the real
   // latest version returned by the API replaces it immediately after.
   const BOOTSTRAP_VERSION = "6.1.1";
+  // spicy-lyrics sends only the bare "x.y.z" (Session.ParseVersion); a raw
+  // LoadedVersion can carry suffixes the API doesn't recognise.
+  const parseVersion = (v) => {
+    const m = typeof v === "string" ? v.match(/(\d+)\.(\d+)\.(\d+)/) : null;
+    return m ? m[0] : null;
+  };
   let extVersion =
-    (window._spicy_lyrics_metadata && window._spicy_lyrics_metadata.LoadedVersion) || null;
+    parseVersion(window._spicy_lyrics_metadata && window._spicy_lyrics_metadata.LoadedVersion);
+
+  // Same deadline spicy-lyrics uses: fetch has none, and a stalled request would
+  // otherwise just sit until the overlay's own 20s bridge timeout.
+  const REQUEST_TIMEOUT_MS = 15_000;
 
   async function apiQuery(queries, headers) {
     const version = extVersion || BOOTSTRAP_VERSION;
-    const res = await fetch(API_HOST + "/query", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "SpicyLyrics-Version": version,
-        ...headers,
-      },
-      body: JSON.stringify({ queries, client: { version: version || "unknown" } }),
-    });
-    if (!res.ok) throw new Error("api http " + res.status);
-    return await res.json();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      const res = await fetch(API_HOST + "/query", {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          "Content-Type": "application/json",
+          "SpicyLyrics-Version": version,
+          // Sent by every spicy-lyrics client request (utils/API/Query.ts).
+          "X-mode": "2",
+          ...headers,
+        },
+        body: JSON.stringify({ queries, client: { version } }),
+      });
+      if (!res.ok) throw new Error("api http " + res.status);
+      return await res.json();
+    } finally {
+      clearTimeout(timer);
+    }
   }
+
+  const jobResult = (data) => {
+    const qs = (data && data.queries) || [];
+    const job = qs.find((q) => q.operationId === "0") || qs[0];
+    return job && job.result ? job.result : null;
+  };
 
   async function ensureVersion() {
     if (extVersion) return extVersion;
     // spicy-lyrics may have loaded after us — pick up its version if present now.
     const meta = window._spicy_lyrics_metadata;
-    if (meta && meta.LoadedVersion) {
-      extVersion = meta.LoadedVersion;
+    const loaded = parseVersion(meta && meta.LoadedVersion);
+    if (loaded) {
+      extVersion = loaded;
       return extVersion;
     }
     try {
-      const data = await apiQuery([{ operation: "ext_version" }], {});
-      const job = (data.queries || []).find((q) => q.operationId === "0") || (data.queries || [])[0];
-      if (job && job.result && job.result.httpStatus === 200 && typeof job.result.data === "string") {
-        extVersion = job.result.data.trim();
-      }
+      const r = jobResult(await apiQuery([{ operation: "ext_version" }], {}));
+      if (r && r.httpStatus === 200) extVersion = parseVersion(r.data);
     } catch (e) {
       LOG("ext_version fetch failed", e);
     }
@@ -217,17 +271,34 @@
     return extVersion;
   }
 
+  async function lyricsQuery(trackId, token) {
+    return jobResult(await apiQuery(
+      [{ operation: "lyrics", variables: { id: trackId, auth: "SpicyLyrics-WebAuth" } }],
+      { "SpicyLyrics-WebAuth": "Bearer " + token }
+    ));
+  }
+
   async function fetchLyrics(trackId) {
     await ensureVersion();
     const token = await getToken();
-    const data = await apiQuery(
-      [{ operation: "lyrics", variables: { id: trackId, auth: "SpicyLyrics-WebAuth" } }],
-      { "SpicyLyrics-WebAuth": "Bearer " + token }
-    );
-    const job = (data.queries || []).find((q) => q.operationId === "0") || (data.queries || [])[0];
-    const status = job && job.result ? job.result.httpStatus : 0;
+    let r = await lyricsQuery(trackId, token);
+
+    // The token looked valid to us but the API refused it — the client rotated it
+    // early. Retire it and retry exactly once with a fresh one (as spicy-lyrics does);
+    // previously a 401 dropped straight through to line-level LRCLIB lyrics.
+    if (r && r.httpStatus === 401) {
+      LOG("lyrics: 401, refreshing token and retrying once");
+      invalidateToken(token);
+      let fresh = null;
+      try { fresh = await getToken(); } catch (e) { /* keep the 401 */ }
+      if (fresh && fresh !== token) r = await lyricsQuery(trackId, fresh);
+    }
+
+    const status = r ? r.httpStatus : 0;
     if (status === 200) {
-      return { status: 200, lyrics: slUnpack(job.result.data) };
+      const lyrics = slUnpack(r.data);
+      if (lyrics == null || lyrics === "") return { status: 404 };
+      return { status: 200, lyrics };
     }
     return { status };
   }
