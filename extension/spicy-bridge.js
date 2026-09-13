@@ -346,10 +346,15 @@
   async function searchViaGraphQL(query) {
     const G = window.Spicetify && Spicetify.GraphQL;
     const defs = G && G.Definitions;
-    // searchModalResults is what the client's own search modal uses; the others
-    // are fallbacks in case a future build renames it.
-    const def = defs && (defs.searchModalResults || defs.searchDesktop || defs.searchTracks);
-    if (!G || !def || typeof G.Request !== "function") {
+    // searchModalResults is what the client's own search modal uses, but it only
+    // returns *top* results — when those are all playlists/artists it yields no
+    // tracks and we fell through to the rate-limited Web API (429). So try each
+    // search definition the client has, track-focused ones first, until one
+    // produces tracks.
+    const candidates = defs
+      ? ["searchTracks", "searchDesktop", "searchModalResults"].filter((n) => defs[n])
+      : [];
+    if (!G || candidates.length === 0 || typeof G.Request !== "function") {
       if (!gqlDiagShown) {
         gqlDiagShown = true;
         const names = defs ? Object.keys(defs) : [];
@@ -362,7 +367,7 @@
     // Spotify's search queries declare a pile of non-null feature-flag
     // variables; omitting any one of them fails the whole request, so send the
     // full known set. Extra unused variables are harmless.
-    const res = await G.Request(def, {
+    const vars = {
       searchTerm: query,
       offset: 0,
       limit: 10,
@@ -374,15 +379,27 @@
       includeAuthors: false,
       includeUsers: false,
       includeGenres: false,
-    });
+    };
 
-    const out = [];
-    collectTracks(res, out, new Set(), 0);
-    if (out.length === 0 && !gqlDiagShown) {
-      gqlDiagShown = true;
-      LOG("graphql returned no tracks; shape: " + JSON.stringify(res).slice(0, 300));
+    let lastErr = null;
+    for (const name of candidates) {
+      let res;
+      try {
+        res = await G.Request(defs[name], vars);
+      } catch (e) {
+        lastErr = e;
+        continue;
+      }
+      const out = [];
+      collectTracks(res, out, new Set(), 0);
+      if (out.length > 0) return out;
+      if (!gqlDiagShown) {
+        gqlDiagShown = true;
+        LOG("graphql " + name + " returned no tracks; shape: " + JSON.stringify(res).slice(0, 300));
+      }
     }
-    return out;
+    if (lastErr) throw lastErr;
+    return [];
   }
 
   async function searchViaWebApi(query) {
