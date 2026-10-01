@@ -150,6 +150,7 @@ const LyricsView = (() => {
         r.end = Math.max(r.end, bg.End);
       }
       if (RTL.test(line.Text)) r.el.classList.add("rtl");
+      r.el.dataset.start = String(r.start);
       rows.push(r);
 
       const next = lines[i + 1];

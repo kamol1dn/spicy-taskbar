@@ -6,7 +6,7 @@ window.WALLPAPER_CONFIG = {
   // "wallpapers" = random image from `folder` on every song change, "dynamic" = album gradient
   background: "wallpapers",
   // Listed by TaskbarLyrics (which must be running). Wallpaper Engine uses its folder picker instead.
-  folder: "C:\\Users\\User\\Pictures\\Wallpapers",
+  folder: "",            // e.g. "C:\\Users\\you\\Pictures\\Wallpapers" or "/home/you/Pictures/Wallpapers"
   // Filter by subfolder or filename prefix (nord_..., gruvbox_...): all, calm, digital, gruvbox, monochrome, nord, others
   collection: "all",
   wallpaperblur: 0,      // px

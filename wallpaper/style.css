@@ -3,7 +3,7 @@
   --lyrics-scale: 1;
   /* spicy: --DefaultLyricsSize, sized for a full-screen desktop instead of a panel */
   --fs: calc(min(5.4vh, 3.2vw) * var(--lyrics-scale));
-  --font: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  --font: "Segoe UI Variable Display", "Segoe UI", "Google Sans Flex", "Inter", "Noto Sans", system-ui, sans-serif;
 }
 
 html, body {
@@ -290,3 +290,52 @@ body[data-layout="lock"].nolyrics .progress { width: 34vh; }
 body.idle:not(.noclock) #clock { opacity: 1; }
 #clockTime { font-size: 13vh; font-weight: 700; letter-spacing: -0.02em; line-height: 1; }
 #clockDate { font-size: 3vh; font-weight: 500; opacity: 0.75; margin-top: 1.2vh; }
+
+/* ---------------- controls (hosts that support them: body.interactive) ----------------
+   Tap a line to jump to it, the cover to play/pause, the bar to seek. */
+#controls { display: none; align-items: center; gap: 1.6vh; width: min(100%, 50vh); justify-content: center; }
+body.interactive #controls { display: flex; }
+#controls button {
+  appearance: none; border: 0; padding: 0; margin: 0;
+  display: grid; place-items: center;
+  width: calc(var(--fs) * 0.95); height: calc(var(--fs) * 0.95);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.25s cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+#controls button[data-act="toggle"] { width: calc(var(--fs) * 1.25); height: calc(var(--fs) * 1.25); background: rgba(255, 255, 255, 0.16); }
+#controls button:hover { background: rgba(255, 255, 255, 0.24); }
+#controls svg { width: 46%; height: 46%; fill: currentColor; }
+#controls .i-play { display: none; }
+body.paused #controls .i-play { display: block; }
+body.paused #controls .i-pause { display: none; }
+body.interactive .coverWrap,
+body.interactive .progress,
+body.interactive .row.lyric { cursor: pointer; }
+body.interactive .progress { padding-block: 0.6vh; margin-block: -0.6vh; }
+body.interactive .row.lyric:not(.act):hover { opacity: 0.78; }
+.tapped { animation: tapped 0.35s ease; }
+@keyframes tapped { 40% { transform: scale(0.94); } }
+.row.tapped { animation: rowTapped 0.45s ease; }
+@keyframes rowTapped { 30% { opacity: 1; } }
+
+/* Lock screen: compact controls next to the strip's progress bar. */
+body[data-layout="lock"] #controls { width: 26vh; justify-content: flex-start; gap: 1vh; }
+body[data-layout="lock"] #controls button { width: 3.4vh; height: 3.4vh; }
+body[data-layout="lock"] #controls button[data-act="toggle"] { width: 4vh; height: 4vh; }
+body[data-layout="lock"].nolyrics #controls { width: 34vh; justify-content: center; gap: 1.6vh; }
+body[data-layout="lock"].nolyrics #controls button { width: 5vh; height: 5vh; }
+body[data-layout="lock"].nolyrics #controls button[data-act="toggle"] { width: 6.2vh; height: 6.2vh; }
+
+/* Lock screen on Linux: the wallpaper layer covers the shell's own desktop clock, so it
+   draws one itself above the lyrics (unless "clock" is off). */
+body[data-surface="lockscreen"]:not(.noclock) #clock {
+  opacity: 1;
+  left: 50%; bottom: auto; top: 10vh;
+  transform: translateX(-50%);
+  text-align: center;
+}
+body[data-surface="lockscreen"] #clockTime { font-size: 11vh; }
+body[data-surface="lockscreen"] #clockDate { font-size: 2.6vh; }

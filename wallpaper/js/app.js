@@ -24,11 +24,14 @@ const settings = {
   folder: "",
   fps: 60,
 };
+const DEFAULTS = Object.assign({}, settings);
 
 // Wallpaper Engine injects its APIs before page scripts run; anything else (Aura,
 // a browser) gets folder listing and audio from TaskbarLyrics over the bridge.
 const IN_WE = typeof window.wallpaperRegisterAudioListener === "function";
-const IS_LOCK = window.WALLPAPER_SURFACE === "lockscreen";
+// The Linux app hosts a single page per monitor and flips it between the two
+// surfaces when the session locks ({type:"surface"}), so this can change at runtime.
+let IS_LOCK = window.WALLPAPER_SURFACE === "lockscreen";
 let weFolder = false; // images come from Wallpaper Engine's folder picker
 
 // Values are coerced to the type of the default, so "false"/"120" become bool/number.
@@ -43,20 +46,22 @@ function setKey(key, raw) {
 // The tray's "Wallpaper" menu (TaskbarLyrics) is where settings are changed. The last
 // ones received are remembered per surface, so the look holds while the app is closed
 // (e.g. the lock screen before login).
-const TRAY_CACHE = "spicywp.tray." + (IS_LOCK ? "lockscreen" : "desktop");
+const trayCacheKey = () => "spicywp.tray." + (IS_LOCK ? "lockscreen" : "desktop");
 
 // Order: built-in defaults < config.js < URL parameters < tray settings.
-(function loadConfig() {
+function loadConfig() {
+  Object.assign(settings, DEFAULTS);
   if (IS_LOCK) { settings.layout = "lock"; settings.clock = false; }
   const cfg = window.WALLPAPER_CONFIG || {};
   for (const k of Object.keys(cfg)) setKey(k, cfg[k]);
   if (IS_LOCK && cfg.lockscreen) for (const k of Object.keys(cfg.lockscreen)) setKey(k, cfg.lockscreen[k]);
   for (const [k, v] of new URLSearchParams(location.search)) setKey(k, v);
   try {
-    const tray = JSON.parse(localStorage.getItem(TRAY_CACHE) || "null");
+    const tray = JSON.parse(localStorage.getItem(trayCacheKey()) || "null");
     if (tray) for (const k of Object.keys(tray)) setKey(k, tray[k]);
   } catch (e) {}
-})();
+}
+loadConfig();
 
 function applySettings() {
   const root = document.documentElement.style;
@@ -202,7 +207,10 @@ const Bridge = (() => {
   function connect() {
     clearTimeout(timer);
     try {
-      ws = new WebSocket(`ws://localhost:${settings.port}/wallpaper`);
+      // The Linux host passes its monitor name, so taps relayed from the lock screen
+      // and the clickable regions it reports are matched to the right surface.
+      const screen = new URLSearchParams(location.search).get("screen");
+      ws = new WebSocket(`ws://localhost:${settings.port}/wallpaper` + (screen ? `?screen=${encodeURIComponent(screen)}` : ""));
     } catch (e) {
       timer = setTimeout(connect, 3000);
       return;
@@ -216,6 +224,7 @@ const Bridge = (() => {
       if (connected) {
         connected = false;
         document.body.classList.remove("bridged");
+        Interact.setSupported(false);
         setLyrics("none", null); // no lyrics source without the app
         WeMedia.replay();
       }
@@ -234,6 +243,9 @@ const Bridge = (() => {
         case "audio": Background.setAudioLevel(Math.min(1, (m.bass || 0) * 1.1)); break;
         case "settings": gotTraySettings(m); break;
         case "next-wallpaper": Background.songChanged(); break;
+        case "surface": setSurface(m.surface); break;
+        case "hello": Interact.setSupported(!!(m.caps && m.caps.controls)); break;
+        case "tap": Interact.tap(m.x, m.y); break;
       }
     };
   }
@@ -260,17 +272,37 @@ const Bridge = (() => {
     reconnect() { if (ws) { try { ws.onclose = null; ws.close(); } catch (e) {} } connected = false; connect(); },
     requestFolder,
     requestAudio,
+    send,
     get connected() { return connected; },
   };
 })();
 
 // ---------------- tray settings ----------------
+let lastTray = null;
 function gotTraySettings(m) {
+  lastTray = m;
+  if (m.interactive !== undefined) Interact.setWanted(m.interactive);
   const mine = Object.assign({}, IS_LOCK ? m.lockscreen : m.desktop, { folder: m.folder || "" });
   const prevFolder = settings.folder, prevAudio = settings.audioreactive;
   for (const k of Object.keys(mine)) setKey(k, mine[k]);
-  try { localStorage.setItem(TRAY_CACHE, JSON.stringify(mine)); } catch (e) {}
+  try { localStorage.setItem(trayCacheKey(), JSON.stringify(mine)); } catch (e) {}
   applySettings();
+  if (settings.folder !== prevFolder) Bridge.requestFolder();
+  if (settings.audioreactive !== prevAudio) Bridge.requestAudio();
+}
+
+// Desktop <-> lock screen, live: rebuild the settings for the other surface (its tray
+// values if the app sent them, else its cached ones) without reloading the page.
+function setSurface(surface) {
+  const lock = surface === "lockscreen";
+  if (lock === IS_LOCK) return;
+  IS_LOCK = lock;
+  window.WALLPAPER_SURFACE = surface;
+  document.body.dataset.surface = surface;
+  const prevFolder = settings.folder, prevAudio = settings.audioreactive;
+  loadConfig();
+  if (lastTray) gotTraySettings(lastTray);
+  else applySettings();
   if (settings.folder !== prevFolder) Bridge.requestFolder();
   if (settings.audioreactive !== prevAudio) Bridge.requestAudio();
 }

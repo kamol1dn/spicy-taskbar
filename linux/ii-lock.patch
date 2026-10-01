@@ -1,0 +1,39 @@
+--- a/modules/common/panels/lock/LockScreen.qml
++++ b/modules/common/panels/lock/LockScreen.qml
+@@ -43,6 +43,18 @@
+             sourceComponent: root.lockSurface
+         }
+ 
++        // spicy-wallpaper: taps on the lyrics wallpaper showing through the lock (lyric
++        // lines, cover, progress, prev/play/next) are relayed to it. Only its small regions
++        // take input; everything else falls through to the lock UI. No-op if not installed.
++        Loader {
++            anchors.fill: parent
++            visible: lockSurfaceLoader.visible
++            opacity: lockSurfaceLoader.opacity
++            active: GlobalStates.screenLocked
++            source: "file://" + Quickshell.env("HOME") + "/.local/share/spicy-wallpaper/SpicyLockInput.qml"
++            onLoaded: item.screenName = sessionLockSurface.screen?.name ?? ""
++        }
++
+         // Privacy shade: opaque cover shown *instantly* when locking for sleep, so the last
+         // frame presented before suspend never shows the desktop mid-transition. Hidden again
+         // (with a fade) on wake via the `lockFocus` hook, or on unlock as a fallback.
+@@ -173,6 +185,17 @@
+         surface: root.sessionLockSurface
+     }
+ 
++    // Mirror the lock into logind's standard LockedHint, so other programs can tell the
++    // session is locked (spicy-wallpaper switches to its lock-screen layout on it).
++    Connections {
++        target: GlobalStates
++        function onScreenLockedChanged() {
++            Quickshell.execDetached(["busctl", "call", "org.freedesktop.login1",
++                "/org/freedesktop/login1/session/auto", "org.freedesktop.login1.Session",
++                "SetLockedHint", "b", GlobalStates.screenLocked ? "true" : "false"]);
++        }
++    }
++
+     function lock() {
+         if (Config.options.lock.useHyprlock) {
+             Quickshell.execDetached(["bash", "-c", "pidof hyprlock || hyprlock"]);

@@ -20,6 +20,10 @@ the taskbar, and optionally as a full-screen [Spicy Lyrics](https://github.com/S
 
 <sub>Screenshots use the wallpaper's built-in demo (`index.html?demo`): placeholder lyrics, generated cover and background. The empty top third of the lock screen is where Windows draws its own clock.</sub>
 
+> **On Linux?** The lyrics wallpaper also runs on Wayland (Hyprland, Sway, niri, KDE…),
+> with playback controls on the desktop and the lock screen — see
+> [Linux (Wayland)](#linux-wayland) below.
+
 ## Features
 
 - **Taskbar strip** — the current line with a per-syllable sweep, background vocals
@@ -83,6 +87,64 @@ after Spotify restarts. The log (`%LOCALAPPDATA%\TaskbarLyrics\log.txt`) then sh
 Use one wallpaper app on the desktop at a time. With the wallpaper up you may want
 tray → **Lyrics → Hide while the desktop is showing**, so the taskbar strip steps aside
 whenever the desktop itself is in front.
+
+## Linux (Wayland)
+
+`linux/` holds **spicy-wallpaper**, a port of the wallpaper half: the same lyrics
+wallpaper, spicetify bridge and tray settings, hosted in a layer-shell surface per
+monitor. There is no taskbar strip, visualizer or active-app name on Linux. In
+return the wallpaper is clickable: tap a lyric line to jump to it, tap the cover to
+play or pause, click the bar to seek, or use the prev/play/next buttons. All of that
+works on the desktop and on the lock screen. Full details are in
+[linux/README.md](linux/README.md).
+
+**1. Dependencies** (Arch / CachyOS; other distros have the same Qt 6 packages):
+
+```bash
+sudo pacman -S --needed qt6-base qt6-declarative qt6-websockets qt6-webengine layer-shell-qt cmake ninja cava
+```
+
+**2. Build, install and autostart.** This builds into `linux/build`, installs
+`~/.local/bin/spicy-wallpaper` and enables a systemd user service bound to
+`graphical-session.target`:
+
+```bash
+git clone https://github.com/kamol1dn/spicy-taskbar
+cd spicy-taskbar
+linux/install.sh --enable
+```
+
+Not using systemd for your session? Leave out `--enable` and start it from your
+compositor, e.g. `exec-once = spicy-wallpaper` for Hyprland. Your image folder is
+detected on first run (`~/Pictures/Wallpapers` or `~/Pictures/wallpaper`). You can
+change it under tray → **Folder…**.
+
+**3. Word-level Spotify lyrics (optional).** Install
+[spicetify](https://spicetify.app), point it at your Spotify install and add the
+bridge. With spotify-launcher everything lives in your home folder, so no root is
+needed:
+
+```bash
+spicetify config spotify_path ~/.local/share/spotify-launcher/install/usr/share/spotify prefs_path ~/.config/spotify/prefs
+linux/install.sh --spicetify   # copies spicy-bridge.js, enables it, runs spicetify apply
+```
+
+Run `spicetify backup apply` again after Spotify updates. Without spicetify you still
+get line-level lyrics from LRCLIB for any MPRIS player.
+
+**4. Lock screen (optional).** The wallpaper shows through a transparent lock
+surface when Hyprland's `misc:session_lock_xray = true` is set. It switches to its
+lock layout when the locker sets logind's `LockedHint`. For the Quickshell
+*illogical-impulse* shell, one patch adds both the hint and the tap relay for the
+lock-screen controls:
+
+```bash
+patch -d ~/.config/quickshell/ii -p1 < linux/ii-lock.patch
+```
+
+Logs go to `~/.local/state/spicy-wallpaper/log.txt` and the config to
+`~/.config/spicy-wallpaper/config.json`. To update, `git pull`, then run
+`linux/install.sh --enable` again.
 
 ## How it works
 

@@ -85,9 +85,10 @@ function loadImage(url, cors) {
   });
 }
 
-// file:///-URL for a path Wallpaper Engine hands us (C:\dir\a b#1.jpg).
+// file:///-URL for a path Wallpaper Engine hands us (C:\dir\a b#1.jpg), or a POSIX
+// path from the Linux app (/home/me/a b#1.jpg).
 function fileUrl(path) {
   if (/^(https?|file|data):/i.test(path)) return path;
-  const parts = path.replace(/\\/g, "/").split("/");
+  const parts = path.replace(/\\/g, "/").replace(/^\/+/, "").split("/");
   return "file:///" + parts.map((s, i) => (i === 0 && /^[a-z]:$/i.test(s) ? s : encodeURIComponent(s))).join("/");
 }
