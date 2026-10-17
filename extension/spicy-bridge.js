@@ -6,7 +6,8 @@
 // It also pushes exact Spotify playback state every 250ms ({type:"sp_state"}), plus
 // immediately on songchange / play-pause so mix-mode transitions land at once,
 // which the overlay uses for tight sync + direct track IDs when Spotify itself
-// is the player.
+// is the player. The position in that push comes from the audio engine's own clock
+// (see "playback position"), not from Spicetify.Player.getProgress().
 (function SpicyBridge() {
   const BRIDGE_URL = "ws://localhost:9012";
   // Mirror our logs to the overlay app so diagnostics land in one file
@@ -463,6 +464,166 @@
     return url.startsWith("https://") ? url : null;
   }
 
+  // ---------- playback position ----------
+  // Spicetify.Player.getProgress() is nothing but the player *state*'s
+  // positionAsOfTimestamp + (now - timestamp), and that state is only republished
+  // when playback itself changes. A crossfade or a custom transition publishes the
+  // incoming track's state while the outgoing one is still playing, so the baseline
+  // is already wrong when it lands — and since nothing republishes it until the next
+  // play/pause/seek, the whole song stays shifted by the length of the blend. That is
+  // the bug the Spotify-side spicy-lyrics doesn't have: it stopped reading
+  // getProgress() for exactly this reason (src/utils/Gets/GetProgress.ts) and polls
+  // the audio engine's own clock instead, keeping the state formula only for the
+  // cases that clock can't serve. This mirrors it.
+  const POS_STALL_MS = 500;       // audio clock unchanged this long while playing => stalled
+  const POS_RECOVERY_POLLS = 3;   // fresh samples needed before handing the clock back to it
+  const POS_JUMP_MS = 1000;       // state moving non-continuously by more than this = seek/track change
+
+  let posAnchor = null;      // { ms, at, uri } — the sample the clock extrapolates from
+  let posRawLast = null;     // previous raw getPositionState reading (stall detection)
+  let posLastChangeAt = null;
+  let posFreshRun = 0;
+  let posUsingState = false; // audio clock stalled; running off the player state instead
+  let posStateLast = null;   // previous state reading (jump detection)
+  let posPolling = false;
+  let posDiagShown = false;
+
+  const currentUri = () => {
+    try {
+      const d = Spicetify.Player.data;
+      return (d && d.item && d.item.uri) || null;
+    } catch (e) {
+      return null;
+    }
+  };
+
+  const clampPos = (ms) => {
+    const dur = Spicetify.Player.getDuration();
+    return Math.max(0, dur > 0 ? Math.min(ms, dur) : ms);
+  };
+
+  // positionAsOfTimestamp is live only while playing; the (now - timestamp) term
+  // extrapolates it, so a paused state has to be reported as it stands.
+  function statePosition(at) {
+    const st = Spicetify.Platform && Spicetify.Platform.PlayerAPI &&
+               Spicetify.Platform.PlayerAPI._state;
+    if (!st || typeof st.positionAsOfTimestamp !== "number") return null;
+    if (!Spicetify.Player.isPlaying()) return st.positionAsOfTimestamp;
+    return st.positionAsOfTimestamp + (at - st.timestamp);
+  }
+
+  // Current position, extrapolated from the last accepted sample.
+  function positionNow() {
+    const now = Date.now();
+    if (posAnchor && posAnchor.uri === currentUri()) {
+      return clampPos(posAnchor.ms + (Spicetify.Player.isPlaying() ? now - posAnchor.at : 0));
+    }
+    // No sample for this track yet (the first poll after a change hasn't landed).
+    const st = statePosition(now);
+    return clampPos(st != null ? st : Spicetify.Player.getProgress());
+  }
+
+  function resetPositionClock() {
+    posAnchor = null;
+    posRawLast = null;
+    posLastChangeAt = null;
+    posFreshRun = 0;
+    posStateLast = null;
+  }
+
+  function acceptSample(raw, at, uri) {
+    const playing = Spicetify.Player.isPlaying();
+    const state = statePosition(at);
+
+    // Did the state move non-continuously since the previous poll? That is a seek or
+    // a track change, and it invalidates a held anchor even when the audio clock
+    // happens to report the very same millisecond on both sides of it.
+    let stateJumped = false;
+    if (state != null) {
+      if (posStateLast && posStateLast.playing && playing) {
+        const expected = posStateLast.ms + (at - posStateLast.at);
+        stateJumped = Math.abs(state - expected) > POS_JUMP_MS;
+      }
+      posStateLast = { ms: state, at, playing };
+    }
+
+    // Not every client refreshes getPositionState continuously — on some builds it
+    // only moves when the player emits a state change, handing back the same number
+    // for tens of seconds. Notice that and run off the state (which is timestamped,
+    // so it extrapolates correctly however rarely it is read) until it recovers. The
+    // way back is sticky: the two sources sit tens of ms apart, so every handover is
+    // a step, and a source that twitches once in a while must not cause one each time.
+    const changed = posRawLast !== raw;
+    posRawLast = raw;
+    if (playing) {
+      if (posLastChangeAt == null) {
+        posLastChangeAt = at;
+        posFreshRun = changed ? 1 : 0;
+      } else {
+        posFreshRun = changed ? posFreshRun + 1 : 0;
+        if (changed) posLastChangeAt = at;
+      }
+      if (posUsingState && posFreshRun >= POS_RECOVERY_POLLS) posUsingState = false;
+      else if (at - posLastChangeAt > POS_STALL_MS) posUsingState = true;
+    } else {
+      // A pause legitimately freezes the audio clock; that is not a stall.
+      posLastChangeAt = at;
+      posFreshRun = 0;
+    }
+
+    if (posUsingState && playing && state != null) {
+      posAnchor = { ms: state, at, uri };
+      return;
+    }
+
+    // Anchor at the moment the value *first* appeared, so a source that refreshes
+    // only occasionally still extrapolates through the gap instead of freezing the
+    // lyrics. Drop a held anchor that belongs to another track or sits on the far
+    // side of a jump — keeping it would add the whole gap on top of the new position.
+    const stale = posAnchor && playing && (posAnchor.uri !== uri || stateJumped);
+    if (!posAnchor || posAnchor.ms !== raw || !playing || stale) {
+      posAnchor = { ms: raw, at, uri };
+    }
+  }
+
+  // Sample the audio engine's clock. Resolves (never rejects) once the anchor is up
+  // to date, or at once when there is nothing to sample.
+  function pollPosition() {
+    if (posPolling) return Promise.resolve();
+    const platform = Spicetify.Platform;
+    const cp = platform && platform.PlayerAPI && platform.PlayerAPI._contextPlayer;
+    const isLocal = !platform || !platform.PlaybackAPI || platform.PlaybackAPI._isLocal !== false;
+    if (!isLocal || !cp || typeof cp.getPositionState !== "function") {
+      // Spotify Connect (the audio plays on another device) or a client without the
+      // API: there is no local audio clock to read, so positionNow falls back to the
+      // state — which is also all a remote position is made of.
+      if (!isLocal) resetPositionClock();
+      else if (!posDiagShown) {
+        posDiagShown = true;
+        LOG("position: _contextPlayer.getPositionState unavailable, using player state");
+      }
+      return Promise.resolve();
+    }
+    posPolling = true;
+    const startedAt = Date.now();
+    const uri = currentUri();
+    // Through a promise so a client where the call throws (or doesn't return one)
+    // lands in the catch below instead of taking the push with it.
+    return Promise.resolve().then(() => cp.getPositionState({})).then((r) => {
+      // The call is async: the value was true somewhere between the request and now,
+      // so date it at the round-trip midpoint rather than at either end.
+      const at = startedAt + (Date.now() - startedAt) / 2;
+      const raw = Number(r && r.position);
+      // A sample that straddles a track change belongs to neither track.
+      if (Number.isFinite(raw) && currentUri() === uri) acceptSample(raw, at, uri);
+    }).catch((e) => {
+      if (!posDiagShown) {
+        posDiagShown = true;
+        LOG("position: getPositionState failed, using player state: " + describeError(e));
+      }
+    }).then(() => { posPolling = false; });
+  }
+
   function playerState() {
     try {
       const d = Spicetify.Player.data;
@@ -471,7 +632,7 @@
       return {
         type: "sp_state",
         playing: Spicetify.Player.isPlaying(),
-        positionMs: Spicetify.Player.getProgress(),
+        positionMs: positionNow(),
         durationMs: Spicetify.Player.getDuration(),
         // Only real tracks have a lyrics id. For spotify:local: the third segment is
         // the URL-encoded artist, and episodes/ads have their own id spaces — sending
@@ -503,7 +664,7 @@
   function startPushing() {
     if (stopPushing) stopPushing();
     let lastTick = 0;
-    const tick = () => { lastTick = Date.now(); pushState(); };
+    const tick = () => { lastTick = Date.now(); syncAndPush(); };
     const stops = [];
     try {
       const url = URL.createObjectURL(new Blob(
@@ -526,6 +687,11 @@
     }
   }
 
+  // Every push the overlay re-syncs its clock to is worth a fresh sample first.
+  function syncAndPush() {
+    try { pollPosition().then(pushState, pushState); } catch (e) { pushState(); }
+  }
+
   // Push the moment Spotify itself changes state, rather than up to PUSH_MS later.
   // Mix mode seeks the incoming track to a non-zero start offset as it blends, so the
   // overlay has to learn the new baseline immediately or it stays behind for the song.
@@ -534,12 +700,14 @@
     eventsBound = true;
     try {
       Spicetify.Player.addEventListener("songchange", () => {
-        pushState();
-        // getProgress() can still report the outgoing track for a tick after the event.
-        setTimeout(pushState, 80);
-        setTimeout(pushState, 300);
+        // Whatever the clock holds belongs to the outgoing track; during a transition
+        // both the audio clock and the state can still describe it for a tick.
+        resetPositionClock();
+        syncAndPush();
+        setTimeout(syncAndPush, 80);
+        setTimeout(syncAndPush, 300);
       });
-      Spicetify.Player.addEventListener("onplaypause", pushState);
+      Spicetify.Player.addEventListener("onplaypause", syncAndPush);
     } catch (e) {
       LOG("could not bind player events: " + describeError(e));
     }

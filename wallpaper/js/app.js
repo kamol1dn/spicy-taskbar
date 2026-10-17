@@ -173,6 +173,10 @@ function setTrack(track) {
   state.trackKey = key;
   if (changed) {
     state.art = null;
+    // The new song's position is a new baseline, not drift: take the next one as
+    // it stands instead of slewing onto it from the previous song's clock (which
+    // a transition into a track starting near the same position would do slowly).
+    Clock.has = false;
     if (track) Background.songChanged();
   }
   document.body.classList.toggle("idle", !track);

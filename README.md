@@ -282,4 +282,9 @@ The wallpaper needs no build — point Wallpaper Engine / Aura at `wallpaper/` d
   non-zero start offset. Windows' media session still names the outgoing track through
   that blend, and its position is only republished on play/pause/seek — so whenever
   Spotify owns the session and the bridge is live, its clock and track id win outright.
-  The log notes any `bridge/SMTC disagree` moment.
+  The log notes any `bridge/SMTC disagree` moment. Inside Spotify the bridge reads the
+  audio engine's own clock (`PlayerAPI._contextPlayer.getPositionState`) instead of
+  `Spicetify.Player.getProgress()`: that one extrapolates the player *state*, which a
+  transition publishes for the incoming track before its audio starts and then never
+  republishes, leaving the word-level sweep shifted by the length of the blend for the
+  rest of the song. Same source spicy-lyrics itself uses.
